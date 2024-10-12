@@ -1,4 +1,11 @@
-
+# Installation
+- Prerequirements: Rust, Git
+## Manual Install
+- Clone the repo (git clone https://github.com/barely-a-dev/Nash.git)
+- Run the install.sh script (cd Nash && chmod +x ./install.sh && ./install.sh)
+## Automated Install
+- Download a release from https://github.com/barely-a-dev/Nash/releases
+- Run it with force update flags (cd /home/<username>/Downloads && chmod +x nash && nash --update -f)
 ### Command-line Options
 
 - `--version`: Display the current version of Nash
@@ -26,7 +33,7 @@
 
 ## Development Status
 
-Nash is currently in early development (v0.0.5). Many features are planned or in progress, including:
+Nash is currently in early development (v0.0.5). Many crucial features are planned or in progress, including:
 
 - Environment variables
 - Command auto-completion improvements
