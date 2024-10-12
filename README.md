@@ -108,17 +108,17 @@ If you're not sure where to start, check out the [issues](https://github.com/bar
 ## Roadmap
 
 The following features and improvements are planned for future releases:
-
-- [ ] Environment variables management system
+(Note: "-" means WIP and partially implemented but unstable, while "/" means WIP but not public. ✔ of course means implemented.)
+- [-] Environment variables management system
 - [ ] Enhanced command auto-completion
 - [ ] Robust configuration system
-- [ ] Improved quoting and escaping mechanisms
+- [ ] Quoting and escaping mechanisms
 - [ ] Alias command support
 - [ ] Scripting capabilities (if, elif, else, for, while, functions, variables)
 - [ ] Wildcards and regex support
 - [ ] Enhanced command-line options
 - [ ] Improved argument handling for built-in commands
-- [ ] Integration with popular text editors (e.g., Nano)
+- [✔] Support for popular, complex commands and text editors (e.g., Nano, Vim)
 
 ## Disclaimer
 

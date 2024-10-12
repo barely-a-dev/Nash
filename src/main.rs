@@ -21,7 +21,7 @@ use std::{
     fs::{self, create_dir, remove_file, OpenOptions},
     io::{self, Error, Write},
     path::{Path, PathBuf},
-    process::{self, Command},
+    process::{self, Command, Stdio},
 };
 use tokio::runtime::Runtime;
 use whoami::fallible;
@@ -175,7 +175,7 @@ fn eval(state: &mut ShellState, cmd: String) -> String {
     let chars_to_check: [char; 3] = [';', '|', '>'];
 
     if !cmd.contains(|c: char| chars_to_check.contains(&c)) {
-        let expanded_cmd = expand_env_vars(&cmd);
+        let expanded_cmd: String = expand_env_vars(&cmd);
         let cmd_parts: Vec<String> = expanded_cmd
             .trim()
             .split_whitespace()
@@ -205,7 +205,13 @@ fn eval(state: &mut ShellState, cmd: String) -> String {
                 process::exit(0);
             }
             "summon" => handle_summon(&cmd_parts),
-            _ => execute_external_command(&cmd_parts[0], &cmd_parts),
+            _ => {
+                let result = execute_external_command(&cmd_parts[0], &cmd_parts);
+                if !result.is_empty() {
+                    println!("{}", result);
+                }
+                NO_RESULT.to_owned()
+            }
         }
     } else {
         special_eval(state, cmd)
@@ -213,9 +219,9 @@ fn eval(state: &mut ShellState, cmd: String) -> String {
 }
 
 fn expand_env_vars(cmd: &str) -> String {
-    let mut result = String::new();
-    let mut in_var = false;
-    let mut var_name = String::new();
+    let mut result: String = String::new();
+    let mut in_var: bool = false;
+    let mut var_name: String = String::new();
 
     for c in cmd.chars() {
         if c == '$' {
@@ -328,7 +334,7 @@ fn env_var_eval(state: &ShellState, cmd: String) -> String {
 
     // Handle environment variable extraction with $
     if cmd.starts_with('$') {
-        let var_name = &cmd[1..];
+        let var_name: &str = &cmd[1..];
         if var_name == "0" {
             return "nash".to_owned(); // Special case for $0
         }
@@ -590,7 +596,12 @@ async fn handle_nash_args(args: Vec<String>) {
         }
         return;
     }
-
+    /* 
+    if args.contains(&"--update-system".to_string())
+    {
+        update_system(identify_system());
+    }
+    */
     // If no recognized arguments, print usage
     print_usage();
 }
@@ -630,6 +641,18 @@ async fn get_remote_version() -> String {
         .trim()
         .to_string()
 }
+
+// fn update_system(system: String)
+// {
+//     // Use user's system's default package manager and any custom ones to update (i.e. sudo apt update && sudo apt full-upgrade or pacman -Syu and yay -Syu)
+//     todo!();
+// }
+
+// fn identify_system()
+// {
+//     // Return user system, such as Arch, Fedora, Debian, etc.
+//     todo!();
+// }
 
 async fn update_nash() {
     // Check if git and Rust are installed
@@ -699,32 +722,32 @@ async fn update_nash() {
 }
 
 fn execute_external_command(cmd: &str, cmd_parts: &[String]) -> String {
-    if let Some(path) = find_command_in_path(cmd) {
-        let output: Result<process::Output, Error> = if cmd_parts.len() > 1 {
-            Command::new(path)
-                .args(&cmd_parts[1..]) // Use arguments if they exist
-                .output()
-        } else {
-            Command::new(path).output()
-        };
-
-        match output {
-            Ok(output) => {
-                if output.status.success() {
-                    String::from_utf8_lossy(&output.stdout).into_owned()
-                } else {
-                    format!(
-                        "Command failed: {}",
-                        String::from_utf8_lossy(&output.stderr)
-                    )
-                }
+    match find_command_in_path(cmd) {
+        Some(path) => {
+            let mut command = Command::new(path);
+            if cmd_parts.len() > 1 {
+                command.args(&cmd_parts[1..]);
             }
-            Err(e) => format!("Failed to execute command: {}", e),
+
+            command.stdin(Stdio::inherit());
+            command.stdout(Stdio::inherit());
+            command.stderr(Stdio::inherit());
+
+            match command.status() {
+                Ok(status) => {
+                    if status.success() {
+                        NO_RESULT.to_owned()
+                    } else {
+                        format!("Command exited with status: {}", status)
+                    }
+                }
+                Err(e) => format!("Failed to execute command: {}", e),
+            }
         }
-    } else {
-        format!("Command not found: {}", cmd)
+        None => format!("Command not found: {}", cmd),
     }
 }
+
 
 fn execute_file(state: &ShellState, path: &str, args: &[String]) -> String {
     let full_path: PathBuf = if path.starts_with('/') {
