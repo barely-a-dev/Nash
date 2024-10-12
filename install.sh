@@ -22,18 +22,36 @@ cd "$(dirname "$0")"
 echo "Building Nash in release mode..."
 cargo build --release
 
-# Copy the binary to /usr/bin
+# Check if the binary was successfully created
+if [ ! -f "./target/release/nash" ]; then
+    echo "Error: Nash binary was not created. Build process may have failed."
+    exit 1
+fi
+
+# Copy the binary to /usr/bin with error checking
 echo "Copying Nash binary to /usr/bin..."
-sudo cp ./target/release/nash /usr/bin/nash
+if sudo cp ./target/release/nash /usr/bin/nash; then
+    echo "Nash binary successfully copied to /usr/bin."
+else
+    echo "Error: Failed to copy Nash binary to /usr/bin. Please check your permissions and try again."
+    exit 1
+fi
+
+# Set appropriate permissions
+sudo chmod 755 /usr/bin/nash
 
 echo "Nash has been successfully installed!"
 echo "You can now use 'nash' command from anywhere in your terminal."
 
-# Optionally, you can add a version check
-if command -v nash &> /dev/null
-then
+# Version check with error handling
+if command -v nash &> /dev/null; then
     echo "Installed Nash version:"
-    nash --version
+    if nash --version; then
+        echo "Nash installation completed successfully."
+    else
+        echo "Warning: Nash was installed but failed to run. Please check for any error messages above."
+    fi
 else
-    echo "Warning: Nash installation might have failed. Please check the output above for any errors."
+    echo "Warning: Nash installation might have failed. The 'nash' command is not recognized."
+    echo "Please check the output above for any errors and try running the installer again."
 fi

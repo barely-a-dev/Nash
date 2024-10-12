@@ -702,8 +702,8 @@ async fn update_nash() {
         }
     }
 
-    // Copy the binary to /usr/bin/nash
-    println!("Copying the binary to /usr/bin/nash...");
+    // Copy the binary to /usr/bin/nash (doesn't work.)
+    println!("Copying the binary to /usr/local/bin/nash... (If there is an error, run the following command: \"sudo cp /tmp/nash_update/target/release/nash /usr/bin/nash && sudo rm -rf /tmp/nash_update\" to manually finish the update.)");
     match Command::new("sudo").args(&["cp", "target/release/nash", "/usr/bin/nash"]).status() {
         Ok(status) if status.success() => println!("Binary copied successfully."),
         _ => {
@@ -717,6 +717,7 @@ async fn update_nash() {
 
     println!("Update completed successfully!");
 }
+
 
 fn execute_external_command(cmd: &str, cmd_parts: &[String]) -> String {
     match find_command_in_path(cmd) {
