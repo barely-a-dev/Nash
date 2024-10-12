@@ -24,7 +24,7 @@ cargo build --release
 
 # Copy the binary to /usr/bin
 echo "Copying Nash binary to /usr/bin..."
-sudo cp ./target/release/Nash /usr/bin/nash
+sudo cp ./target/release/nash /usr/bin/nash
 
 echo "Nash has been successfully installed!"
 echo "You can now use 'nash' command from anywhere in your terminal."

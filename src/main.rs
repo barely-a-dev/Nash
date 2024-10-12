@@ -538,7 +538,7 @@ async fn update_nash() {
     }
 
     // Copy the binary to /usr/bin/nash
-    if !Command::new("sudo").args(&["cp", "target/release/Nash", "/usr/bin/nash"]).status().unwrap().success() {
+    if !Command::new("sudo").args(&["cp", "target/release/nash", "/usr/bin/nash"]).status().unwrap().success() {
         println!("Failed to copy the binary to /usr/bin/nash");
         return;
     }
