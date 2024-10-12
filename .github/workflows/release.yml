@@ -1,13 +1,17 @@
 name: Build, Test, and Release Nash
 
 on:
-  push:
-    branches:
-      - main
-      
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag for the release (e.g., v1.0.0)'
+        required: true
+      version_name:
+        description: 'Version name for the release'
+        required: true
+
 permissions:
   contents: write
-
 
 jobs:
   build-test-release:
@@ -25,27 +29,31 @@ jobs:
     - name: Run nash command
       run: nash --version
       
-    - name: Get version and run count
-      id: version
+    - name: Check if release exists
+      id: check_release
       run: |
-        VERSION=$(cat ver)
-        RUN_COUNT=$(cat ver.count || echo 0)
-        NEW_COUNT=$((RUN_COUNT + 1))
-        echo $NEW_COUNT > ver.count
-        echo "::set-output name=version::${VERSION}.${NEW_COUNT}"
+        if gh release view ${{ github.event.inputs.tag }} &>/dev/null; then
+          echo "::set-output name=exists::true"
+        else
+          echo "::set-output name=exists::false"
+        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Create Release
+      if: steps.check_release.outputs.exists == 'false'
       id: create_release
       uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: v${{ steps.version.outputs.version }}
-        release_name: Release ${{ steps.version.outputs.version }}
+        tag_name: ${{ github.event.inputs.tag }}
+        release_name: ${{ github.event.inputs.version_name }}
         draft: false
         prerelease: false
 
     - name: Upload Release Asset
+      if: steps.check_release.outputs.exists == 'false'
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,3 +62,9 @@ jobs:
         asset_path: ./target/release/Nash
         asset_name: Nash
         asset_content_type: application/octet-stream
+
+    - name: Release already exists
+      if: steps.check_release.outputs.exists == 'true'
+      run: |
+        echo "Error: A release with the tag ${{ github.event.inputs.tag }} already exists."
+        exit 1
