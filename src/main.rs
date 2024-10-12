@@ -1,5 +1,6 @@
+// Important TODOs: Fix updating, which evidently never worked.
 // MAJOR TODOs: export for env vars, CONFIG, set/unset for setting config (easy?), quotes and escaping ('', "", \), alias command (easy)
-// Absolutely HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables), wildcards/regex (*, ?, []), command line options (-c, etc)/(handle_nash_args), ACTUAL ARGUMENTS FOR COMMANDS (like ls -a and rm -f instead of just ls and rm (I am not doing rm -r. It's stupid.))
+// Absolutely HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables), wildcards/regex (*, ?, []), ACTUAL ARGUMENTS FOR COMMANDS (like ls -a and rm -f instead of just ls and rm (I am not doing rm -r. It's stupid.))
 pub mod editing;
 
 use crate::editing::*;
@@ -206,6 +207,7 @@ fn eval(state: &mut ShellState, cmd: String) -> String {
             }
             "summon" => handle_summon(&cmd_parts),
             _ => {
+                // For alias command, will have to change to check against list of aliases first.
                 let result = execute_external_command(&cmd_parts[0], &cmd_parts);
                 if !result.is_empty() {
                     println!("{}", result);
@@ -262,76 +264,109 @@ fn handle_summon(cmd_parts: &[String]) -> String {
         let executable: &String = &cmd_parts[1];
         let args: Vec<&String> = cmd_parts.iter().skip(2).collect();
 
-        // List of common terminal emulators
-        let terminals: Vec<&str> = vec![
-            "x-terminal-emulator",
-            "gnome-terminal",
-            "konsole",
-            "xterm",
-            "urxvt",
-            "alacritty",
-            "warp",
-            "termux",
-            "qterminal",
-            "kitty",
-            "tilix",
-            "terminator",
-            "rxvt",
-            "st",
-            "terminology",
-            "hyper",
-            "iterm2",
-        ];
+                // List of common terminal emulators
+                let terminals: Vec<&str> = vec![
+                    "x-terminal-emulator",
+                    "gnome-terminal",
+                    "konsole",
+                    "xterm",
+                    "urxvt",
+                    "alacritty",
+                    "warp",
+                    "termux",
+                    "qterminal",
+                    "kitty",
+                    "tilix",
+                    "terminator",
+                    "rxvt",
+                    "st",
+                    "terminology",
+                    "hyper",
+                    "iterm2",
+                ];
+        
+                let mut installed_terminals: Vec<&str> = Vec::new();
+        
+                // Check for installed terminals
+                for &terminal in &terminals {
+                    if let Ok(output) = Command::new("which").arg(terminal).output() {
+                        if !output.stdout.is_empty() {
+                            installed_terminals.push(terminal);
+                            println!("Found terminal: {}", terminal);
+                        }
+                    }
+                }
+        
+                // No terminal :(
+                if installed_terminals.is_empty() {
+                    eprintln!("Unable to find a suitable terminal emulator");
+                    return NO_RESULT.to_owned();
+                }
+        
+                // Use the first installed terminal in the list
+                let terminal: &str = &installed_terminals[0];
+                println!("Using terminal: {}", terminal);
+                
 
-        let mut installed_terminals: Vec<&str> = Vec::new();
-
-        // Check for installed terminals
-        for &terminal in &terminals {
-            if Command::new("which").arg(terminal).output().is_ok() {
-                installed_terminals.push(terminal);
-            }
-        }
-
-        // No terminal :(
-        if installed_terminals.is_empty() {
-            eprintln!("Unable to find a suitable terminal emulator");
-            return NO_RESULT.to_owned();
-        }
-
-        // Use the first installed terminal in the list
-        let terminal: &str = &installed_terminals[0];
         let result: Result<process::Child, Error> = match terminal {
             "gnome-terminal" => {
                 let mut cmd = vec!["bash", "-c", executable];
                 cmd.extend(args.iter().map(|s| s.as_str()));
-                Command::new(terminal).args(&["--"]).args(&cmd).spawn()
+                println!("Executing: {} -- {} {:?}", terminal, cmd.join(" "), cmd);
+                Command::new(terminal)
+                    .args(&["--"])
+                    .args(&cmd)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
             },
             "warp" => {
                 let mut cmd = vec![executable.as_str()];
                 cmd.extend(args.iter().map(|s| s.as_str()));
-                Command::new(terminal).arg("--cmd").args(&cmd).spawn()
+                println!("Executing: {} --cmd {} {:?}", terminal, cmd.join(" "), cmd);
+                Command::new(terminal)
+                    .arg("--cmd")
+                    .args(&cmd)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
             },
             "termux" => {
                 let mut cmd = vec![executable.as_str()];
                 cmd.extend(args.iter().map(|s| s.as_str()));
-                Command::new(terminal).arg("-e").args(&cmd).spawn()
+                println!("Executing: {} -e {} {:?}", terminal, cmd.join(" "), cmd);
+                Command::new(terminal)
+                    .arg("-e")
+                    .args(&cmd)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
             },
             _ => {
                 let mut cmd = vec![executable.as_str()];
                 cmd.extend(args.iter().map(|s| s.as_str()));
-                Command::new(terminal).arg("-e").args(&cmd).spawn()
+                println!("Executing: {} -e {} {:?}", terminal, cmd.join(" "), cmd);
+                Command::new(terminal)
+                    .arg("-e")
+                    .args(&cmd)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
             },
         };
 
         match result {
             Ok(child) => return child.id().to_string(),
-            Err(e) => return format!("An error occurred: {}", e),
+            Err(e) => return format!("An error occurred: {} (Command: {})", e, executable),
         }
     } else {
         "Usage: summon <external command or path to executable file> [args...]".to_owned()
     }
 }
-
 
 fn env_var_eval(state: &ShellState, cmd: String) -> String {
     let count: usize = cmd.chars().filter(|c| *c == '=').count();
