@@ -656,6 +656,7 @@ async fn get_remote_version() -> String {
 
 async fn update_nash() {
     // Check if git and Rust are installed
+    println!("If the program errors, Git is not installed.");
     if !Command::new("git")
         .arg("--version")
         .status()
@@ -665,7 +666,7 @@ async fn update_nash() {
         println!("Git is not installed. Please install Git and try again.");
         return;
     }
-
+    println!("If the program errors, Rust is not installed.");
     if !Command::new("rustc")
         .arg("--version")
         .status()
