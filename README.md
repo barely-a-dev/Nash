@@ -110,7 +110,7 @@ If you're not sure where to start, check out the [issues](https://github.com/bar
 The following features and improvements are planned for future releases:
 (Note: "-" means WIP and partially implemented but unstable, while "/" means WIP but not public. ✔ of course means implemented.)
 - [-] Environment variables management system
-- [ ] Enhanced command auto-completion
+- [-] Enhanced command auto-completion
 - [ ] Robust configuration system
 - [ ] Quoting and escaping mechanisms
 - [ ] Alias command support

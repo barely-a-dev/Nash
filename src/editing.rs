@@ -7,14 +7,16 @@ use rustyline::Result;
 use std::fs::DirEntry;
 use std::io;
 use std::borrow::Cow;
+use std::env;
 
 pub struct AutoCompleter {
     current_dir: PathBuf,
     commands: Vec<String>,
 }
+
 impl AutoCompleter {
     pub fn new(current_dir: PathBuf) -> Self {
-        let commands: Vec<String> = vec![
+        let mut commands: Vec<String> = vec![
             "cd".to_string(),
             "ls".to_string(),
             "cp".to_string(),
@@ -26,6 +28,27 @@ impl AutoCompleter {
             "summon".to_string(),
             // More built-in commands here
         ];
+
+        // Index PATH and add external commands
+        if let Ok(path) = env::var("PATH") {
+            for dir in path.split(":") {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        if let Ok(file_type) = entry.file_type() {
+                            if file_type.is_file() {
+                                if let Some(file_name) = entry.file_name().to_str() {
+                                    commands.push(file_name.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        commands.sort();
+        commands.dedup();
+
         AutoCompleter { current_dir, commands }
     }
 
@@ -95,6 +118,7 @@ fn extract_word(line: &str, pos: usize) -> (usize, &str) {
     }
     (start, &line[start..pos])
 }
+
 pub struct LineHighlighter;
 
 impl LineHighlighter {

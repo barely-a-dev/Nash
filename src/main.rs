@@ -655,26 +655,24 @@ async fn get_remote_version() -> String {
 // }
 
 async fn update_nash() {
-    // Check if git and Rust are installed
-    println!("If the program errors, Git is not installed.");
-    if !Command::new("git")
-        .arg("--version")
-        .status()
-        .unwrap()
-        .success()
-    {
-        println!("Git is not installed. Please install Git and try again.");
-        return;
+    // Check if git is installed
+    println!("Checking if Git is installed...");
+    match Command::new("git").arg("--version").output() {
+        Ok(_) => println!("Git is installed."),
+        Err(_) => {
+            println!("Git is not installed. Please install Git and try again.");
+            return;
+        }
     }
-    println!("If the program errors, Rust is not installed.");
-    if !Command::new("rustc")
-        .arg("--version")
-        .status()
-        .unwrap()
-        .success()
-    {
-        println!("Rust is not installed. Please install [Rust](https://www.rust-lang.org/tools/install) and try again.");
-        return;
+
+    // Check if Rust is installed
+    println!("Checking if Rust is installed...");
+    match Command::new("rustc").arg("--version").output() {
+        Ok(_) => println!("Rust is installed."),
+        Err(_) => {
+            println!("Rust is not installed. Please install Rust (https://www.rust-lang.org/tools/install) and try again.");
+            return;
+        }
     }
 
     // Clone or pull the repository
@@ -695,25 +693,23 @@ async fn update_nash() {
     env::set_current_dir(&temp_dir).expect("Failed to change directory");
 
     // Build the project
-    if !Command::new("cargo")
-        .args(&["build", "--release"])
-        .status()
-        .unwrap()
-        .success()
-    {
-        println!("Failed to build the project");
-        return;
+    println!("Building the project...");
+    match Command::new("cargo").args(&["build", "--release"]).status() {
+        Ok(status) if status.success() => println!("Project built successfully."),
+        _ => {
+            println!("Failed to build the project");
+            return;
+        }
     }
 
     // Copy the binary to /usr/bin/nash
-    if !Command::new("sudo")
-        .args(&["cp", "target/release/nash", "/usr/bin/nash"])
-        .status()
-        .unwrap()
-        .success()
-    {
-        println!("Failed to copy the binary to /usr/bin/nash");
-        return;
+    println!("Copying the binary to /usr/bin/nash...");
+    match Command::new("sudo").args(&["cp", "target/release/nash", "/usr/bin/nash"]).status() {
+        Ok(status) if status.success() => println!("Binary copied successfully."),
+        _ => {
+            println!("Failed to copy the binary to /usr/bin/nash");
+            return;
+        }
     }
 
     // Clean up
