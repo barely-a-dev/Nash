@@ -1,4 +1,4 @@
-// MAJOR TODOs: environment variables. (0=nash, echo $0 outs "nash"), command autocompletion, export for env vars, CONFIG, set/unset for setting config (easy?), quotes and escaping ('', "", \), alias command (easy)
+// MAJOR TODOs: export for env vars, CONFIG, set/unset for setting config (easy?), quotes and escaping ('', "", \), alias command (easy)
 // Absolutely HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables), wildcards/regex (*, ?, []), command line options (-c, etc)/(handle_nash_args), ACTUAL ARGUMENTS FOR COMMANDS (like ls -a and rm -f instead of just ls and rm (I am not doing rm -r. It's stupid.))
 pub mod editing;
 
@@ -32,6 +32,7 @@ fn main() {
     let runtime: Runtime = Runtime::new().unwrap();
     runtime.block_on(async {
         let args: Vec<String> = std::env::args().collect();
+        env::set_var("0", "nash");
         if args.len() <= 1 {
             let mut state: ShellState = ShellState {
                 cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")).to_string_lossy().to_string(),
@@ -154,82 +155,167 @@ fn get_history_file_path() -> PathBuf {
 fn eval(state: &mut ShellState, cmd: String) -> String {
     let chars_to_check: [char; 3] = [';', '|', '>'];
     
-    if !cmd.contains(|c: char| chars_to_check.contains(&c))
-    {
-        let cmd_parts: Vec<String> = cmd.trim().split_whitespace().map(String::from).collect();
-        let mut cmd_args: Vec<String> = vec![];
-        if cmd_parts.len() > 1 {
-            cmd_args = cmd_parts[1..].to_vec();
+    if !cmd.contains(|c: char| chars_to_check.contains(&c)) {
+        let expanded_cmd = expand_env_vars(&cmd);
+        let cmd_parts: Vec<String> = expanded_cmd.trim().split_whitespace().map(String::from).collect();
+        
+        if cmd_parts.is_empty() {
+            return "Empty command".to_owned();
         }
-        match cmd_parts.get(0).map(String::as_str) {
-            Some(cmd) if cmd.starts_with('.') => execute_file(state, &cmd[1..], &cmd_args),
-            Some("cp") => handle_cp(&cmd_parts),
-            Some("mv") => handle_mv(&cmd_parts),
-            Some("rm") => handle_rm(&cmd_parts),
-            Some("mkdir") => handle_mkdir(&cmd_parts),
-            Some("ls") => handle_ls(state, &cmd_parts),
-            Some("cd") => handle_cd(state, &cmd_parts),
-            Some("history") => handle_history(),
-            Some("exit") => {
+
+        // Check if the first part is an environment variable assignment
+        if cmd_parts[0].contains('=') {
+            return env_var_eval(state, cmd_parts[0].clone());
+        }
+
+        match cmd_parts[0].as_str() {
+            cmd if cmd.starts_with('.') => execute_file(state, &cmd[1..], &cmd_parts[1..]),
+            "cp" => handle_cp(&cmd_parts),
+            "mv" => handle_mv(&cmd_parts),
+            "rm" => handle_rm(&cmd_parts),
+            "mkdir" => handle_mkdir(&cmd_parts),
+            "ls" => handle_ls(state, &cmd_parts),
+            "cd" => handle_cd(state, &cmd_parts),
+            "history" => handle_history(),
+            "exit" => {
                 println!("Exiting...");
                 process::exit(0);
             }
-            Some("summon") => {
-                if cmd_parts.len() == 2 {
-                    let executable: &String = &cmd_parts[1];
-                    // List of common terminal emulators
-                    let terminals: Vec<&str> = vec![
-                        "x-terminal-emulator", "gnome-terminal", "konsole", "xterm", "urxvt", "alacritty",
-                        "warp", "termux", "qterminal", "kitty", "tilix", "terminator", "rxvt", "st",
-                        "terminology", "hyper", "iterm2"
-                    ];
-            
-                    let mut installed_terminals: Vec<&str> = Vec::new();
-            
-                    // Check for installed terminals
-                    for &terminal in &terminals {
-                        if Command::new("which").arg(terminal).output().is_ok() {
-                            installed_terminals.push(terminal);
-                        }
-                    }
-            
-                    // No terminal :(
-                    if installed_terminals.is_empty() {
-                        eprintln!("Unable to find a suitable terminal emulator");
-                        return NO_RESULT.to_owned();
-                    }
-            
-                    // Use the first installed terminal in the list
-                    let terminal: &str = &installed_terminals[0];
-                    let result: Result<process::Child, Error> = match terminal {
-                        "gnome-terminal" => Command::new(terminal)
-                            .args(&["--", "bash", "-c", executable])
-                            .spawn(),
-                        "warp" => Command::new(terminal)
-                            .args(&["--cmd", executable])
-                            .spawn(),
-                        "termux" => Command::new(terminal)
-                            .args(&["-e", executable])
-                            .spawn(),
-                        _ => Command::new(terminal)
-                            .args(&["-e", executable])
-                            .spawn(),
-                    };
-            
-                    match result {
-                        Ok(child) => return child.id().to_string(),
-                        Err(e) => return format!("An error occurred: {}", e),
-                    }
-                } else {
-                    "Usage: summon <external command or path to executable file>".to_owned()
-                }
-            }
-            Some(cmd) => execute_external_command(cmd, &cmd_parts),
-            None => "Empty command".to_owned(),
+            "summon" => handle_summon(&cmd_parts),
+            _ => execute_external_command(&cmd_parts[0], &cmd_parts),
         }
     } else {
         special_eval(state, cmd)
     }
+}
+
+fn expand_env_vars(cmd: &str) -> String {
+    let mut result = String::new();
+    let mut in_var = false;
+    let mut var_name = String::new();
+
+    for c in cmd.chars() {
+        if c == '$' {
+            in_var = true;
+            var_name.clear();
+        } else if in_var {
+            if c.is_alphanumeric() || c == '_' {
+                var_name.push(c);
+            } else {
+                in_var = false;
+                if let Ok(value) = env::var(&var_name) {
+                    result.push_str(&value);
+                } else {
+                    result.push('$');
+                    result.push_str(&var_name);
+                }
+                result.push(c);
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    if in_var {
+        if let Ok(value) = env::var(&var_name) {
+            result.push_str(&value);
+        } else {
+            result.push('$');
+            result.push_str(&var_name);
+        }
+    }
+
+    result
+}
+
+fn handle_summon(cmd_parts: &[String]) -> String {
+    if cmd_parts.len() == 2 {
+        let executable: &String = &cmd_parts[1];
+        // List of common terminal emulators
+        let terminals: Vec<&str> = vec![
+            "x-terminal-emulator", "gnome-terminal", "konsole", "xterm", "urxvt", "alacritty",
+            "warp", "termux", "qterminal", "kitty", "tilix", "terminator", "rxvt", "st",
+            "terminology", "hyper", "iterm2"
+        ];
+
+        let mut installed_terminals: Vec<&str> = Vec::new();
+
+        // Check for installed terminals
+        for &terminal in &terminals {
+            if Command::new("which").arg(terminal).output().is_ok() {
+                installed_terminals.push(terminal);
+            }
+        }
+
+        // No terminal :(
+        if installed_terminals.is_empty() {
+            eprintln!("Unable to find a suitable terminal emulator");
+            return NO_RESULT.to_owned();
+        }
+
+        // Use the first installed terminal in the list
+        let terminal: &str = &installed_terminals[0];
+        let result: Result<process::Child, Error> = match terminal {
+            "gnome-terminal" => Command::new(terminal)
+                .args(&["--", "bash", "-c", executable])
+                .spawn(),
+            "warp" => Command::new(terminal)
+                .args(&["--cmd", executable])
+                .spawn(),
+            "termux" => Command::new(terminal)
+                .args(&["-e", executable])
+                .spawn(),
+            _ => Command::new(terminal)
+                .args(&["-e", executable])
+                .spawn(),
+        };
+
+        match result {
+            Ok(child) => return child.id().to_string(),
+            Err(e) => return format!("An error occurred: {}", e),
+        }
+    } else {
+        "Usage: summon <external command or path to executable file>".to_owned()
+    }
+}
+
+
+fn env_var_eval(state: &ShellState, cmd: String) -> String {
+    let count: usize = cmd.chars().filter(|c| *c == '=').count();
+    if count > 1 {
+        return "Command contains more than one environment variable assignment (parsing issue)".to_owned();
+    } else if count == 1 {
+        // Handle environment variable assignment
+        let parts: Vec<String> = cmd.split('=').map(|s| s.trim().to_owned()).collect();
+        if parts.len() == 2 {
+            env::set_var(&parts[0], &parts[1]);
+            return NO_RESULT.to_owned();
+        } else {
+            return "Invalid environment variable assignment".to_owned();
+        }
+    }
+
+    // Handle environment variable extraction with $
+    if cmd.starts_with('$') {
+        let var_name = &cmd[1..];
+        if var_name == "0" {
+            return "nash".to_owned(); // Special case for $0
+        }
+        if let Ok(value) = env::var(var_name) {
+            if cmd.trim() == format!("${}", var_name) {
+                // If the command is just the variable, attempt to execute it
+                return execute_external_command(&value, &[value.clone()]);
+            } else {
+                // Otherwise, return the value
+                return value;
+            }
+        } else {
+            return format!("Environment variable not found: {}", var_name);
+        }
+    }
+
+    // If we reach here, it means there was no assignment or extraction
+    "Invalid environment variable operation".to_owned()
 }
 
 fn special_eval(state: &mut ShellState, cmd: String) -> String {
@@ -446,7 +532,7 @@ async fn handle_nash_args(args: Vec<String>) {
 
     // Handle other command-line arguments
     if args.contains(&"--version".to_string()) {
-        println!("v0.0.5");
+        println!("v0.0.7");
         return;
     }
 
@@ -551,9 +637,14 @@ async fn update_nash() {
 
 fn execute_external_command(cmd: &str, cmd_parts: &[String]) -> String {
     if let Some(path) = find_command_in_path(cmd) {
-        let output: Result<process::Output, Error> = Command::new(path)
-            .args(&cmd_parts[1..])  // Use all arguments
-            .output();
+        let output: Result<process::Output, Error> = if cmd_parts.len() > 1 {
+            Command::new(path)
+                .args(&cmd_parts[1..])  // Use arguments if they exist
+                .output()
+        } else {
+            Command::new(path)
+                .output()
+        };
 
         match output {
             Ok(output) => {

@@ -33,7 +33,7 @@
 
 ## Development Status
 
-Nash is currently in early development (v0.0.5). Many crucial features are planned or in progress, including:
+Nash is currently in early development (v0.0.7). Many crucial features are planned or in progress, including:
 
 - Environment variables
 - Command auto-completion improvements
@@ -41,13 +41,15 @@ Nash is currently in early development (v0.0.5). Many crucial features are plann
 - Quoting and escaping
 - Alias command
 - Scripting capabilities (if, elif, else, for, while, functions, variables)
-- Wildcards and regex support
+- Wildcards and [regex](https://en.wikipedia.org/wiki/Regular_expression) support
 - Enhanced command-line options
 - Improved argument handling for built-in commands
+- [Nano](https://www.nano-editor.org/) support
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a [Pull Request](https://docs.github.com/en/pull-requests).
+If you don't know how to contribute, open an [issue](https://github.com/barely-a-dev/Nash/issues/new) with the enhancement label.
 
 ## Disclaimer
 
