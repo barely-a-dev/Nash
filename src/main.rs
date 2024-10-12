@@ -17,6 +17,7 @@ use rustyline::{
 use rustyline_derive::Helper;
 use std::{
     borrow::Cow,
+    collections::HashMap,
     env,
     ffi::OsStr,
     fs::{self, create_dir, remove_file, OpenOptions},
@@ -172,51 +173,164 @@ fn get_history_file_path() -> PathBuf {
     path
 }
 
+fn get_alias_file_path() -> PathBuf {
+    let mut path: PathBuf = get_prog_dir();
+    path.push("alias");
+    path
+}
+
 fn eval(state: &mut ShellState, cmd: String) -> String {
-    let chars_to_check: [char; 3] = [';', '|', '>'];
+    let chars_to_check = [';', '|', '>'];
 
-    if !cmd.contains(|c: char| chars_to_check.contains(&c)) {
-        let expanded_cmd: String = expand_env_vars(&cmd);
-        let cmd_parts: Vec<String> = expanded_cmd
-            .trim()
-            .split_whitespace()
-            .map(String::from)
-            .collect();
+    if cmd.contains(|c| chars_to_check.contains(&c)) {
+        return special_eval(state, cmd);
+    }
 
-        if cmd_parts.is_empty() {
-            return "Empty command".to_owned();
-        }
+    let expanded_cmd = expand_env_vars(&cmd);
+    let cmd_parts: Vec<String> = expanded_cmd
+        .trim()
+        .split_whitespace()
+        .map(String::from)
+        .collect();
 
-        // Check if the first part is an environment variable assignment
-        if cmd_parts[0].contains('=') {
-            return env_var_eval(state, cmd_parts[0].clone());
-        }
+    if cmd_parts.is_empty() {
+        return "Empty command".to_owned();
+    }
 
-        match cmd_parts[0].as_str() {
-            cmd if cmd.starts_with('.') => execute_file(state, &cmd[1..], &cmd_parts[1..]),
-            "cp" => handle_cp(&cmd_parts),
-            "mv" => handle_mv(&cmd_parts),
-            "rm" => handle_rm(&cmd_parts),
-            "mkdir" => handle_mkdir(&cmd_parts),
-            "ls" => handle_ls(state, &cmd_parts),
-            "cd" => handle_cd(state, &cmd_parts),
-            "history" => handle_history(),
-            "exit" => {
-                println!("Exiting...");
-                process::exit(0);
-            }
-            "summon" => handle_summon(&cmd_parts),
-            _ => {
-                // For alias command, will have to change to check against list of aliases first.
-                let result = execute_external_command(&cmd_parts[0], &cmd_parts);
-                if !result.is_empty() {
-                    println!("{}", result);
-                }
-                NO_RESULT.to_owned()
-            }
-        }
+    // Check if the first part is an environment variable assignment
+    if cmd_parts[0].contains('=') {
+        return env_var_eval(state, cmd_parts[0].clone());
+    }
+
+    // Load aliases
+    let alias_file_path = get_alias_file_path();
+    let aliases = load_aliases(&alias_file_path);
+
+    // Check for alias and expand if found
+    let expanded_cmd_parts = if let Some(alias_cmd) = aliases.get(&cmd_parts[0]) {
+        let mut new_cmd_parts: Vec<String> = alias_cmd.split_whitespace().map(String::from).collect();
+        new_cmd_parts.extend_from_slice(&cmd_parts[1..]);
+        new_cmd_parts
     } else {
-        special_eval(state, cmd)
+        cmd_parts
+    };
+
+    // Now process the command (which might be an expanded alias)
+    match expanded_cmd_parts[0].as_str() {
+        cmd if cmd.starts_with('.') => execute_file(state, &cmd[1..], &expanded_cmd_parts[1..]),
+        "cp" => handle_cp(&expanded_cmd_parts),
+        "mv" => handle_mv(&expanded_cmd_parts),
+        "rm" => handle_rm(&expanded_cmd_parts),
+        "mkdir" => handle_mkdir(&expanded_cmd_parts),
+        "ls" => handle_ls(state, &expanded_cmd_parts),
+        "cd" => handle_cd(state, &expanded_cmd_parts),
+        "history" => handle_history(),
+        "exit" => {
+            println!("Exiting...");
+            process::exit(0);
+        }
+        "summon" => handle_summon(&expanded_cmd_parts),
+        "alias" => handle_alias(&expanded_cmd_parts),
+        "rmalias" => handle_remove_alias(&expanded_cmd_parts),
+        _ => {
+            // If not a built-in command, execute as an external command
+            let result = execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts);
+            if !result.is_empty() {
+                println!("{}", result);
+            }
+            NO_RESULT.to_owned()
+        }
+    }
+}
+
+fn special_eval(state: &mut ShellState, cmd: String) -> String {
+    let mut result = String::new();
+    let commands: Vec<String> = cmd.split(';').map(|s| s.trim().to_owned()).collect();
+
+    for command in commands {
+        if command.contains("|") {
+            result = pipe_eval(command);
+        } else if command.contains(">") {
+            result = out_redir_eval(state, command);
+        } else {
+            result = eval(state, command);
+        }
+    }
+    result
+}
+
+fn pipe_eval(cmd: String) -> String {
+    let parts: Vec<String> = cmd.split('|').map(|s| s.trim().to_owned()).collect();
+
+    let mut input = String::new();
+    for part in parts {
+        let command_parts: Vec<String> = part.split_whitespace().map(String::from).collect();
+        let command = &command_parts[0];
+        let args = &command_parts[1..];
+
+        // Create a command with the input as stdin
+        let mut child = Command::new(command)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Failed to start command");
+
+        // Write the previous command's output to this command's input
+        if !input.is_empty() {
+            let stdin = child.stdin.as_mut().expect("Failed to open stdin");
+            stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+        }
+
+        // Get the output of this command
+        let output = child.wait_with_output().expect("Failed to read stdout");
+
+        if output.status.success() {
+            input = String::from_utf8_lossy(&output.stdout).into_owned();
+        } else {
+            return format!("Command failed and output error: {}", String::from_utf8_lossy(&output.stderr));
+        }
+    }
+
+    input
+}
+
+fn out_redir_eval(state: &mut ShellState, cmd: String) -> String {
+    let parts: Vec<String> = if cmd.contains("2>>") {
+        cmd.splitn(2, "2>>").map(|s| s.trim().to_owned()).collect()
+    } else if cmd.contains(">>") {
+        cmd.splitn(2, ">>").map(|s| s.trim().to_owned()).collect()
+    } else if cmd.contains("2>") {
+        cmd.splitn(2, "2>").map(|s| s.trim().to_owned()).collect()
+    } else {
+        cmd.splitn(2, ">").map(|s| s.trim().to_owned()).collect()
+    };
+
+    if parts.len() != 2 {
+        return "Invalid output redirection syntax".to_owned();
+    }
+
+    let command = parts[0].clone();
+    let file_path = parts[1].clone();
+    let append_mode = cmd.contains(">>");
+
+    let mut file_options = OpenOptions::new();
+    file_options.write(true).create(true);
+    if append_mode {
+        file_options.append(true);
+    } else {
+        file_options.truncate(true);
+    }
+
+    match file_options.open(&file_path) {
+        Ok(mut file) => {
+            let output = eval(state, command);
+            match file.write_all(output.as_bytes()) {
+                Ok(_) => NO_RESULT.to_owned(),
+                Err(e) => format!("Failed to write to file: {}", e),
+            }
+        }
+        Err(e) => format!("Failed to open file: {}", e),
     }
 }
 
@@ -368,7 +482,7 @@ fn handle_summon(cmd_parts: &[String]) -> String {
     }
 }
 
-fn env_var_eval(state: &ShellState, cmd: String) -> String {
+fn env_var_eval(_state: &ShellState, cmd: String) -> String {
     let count: usize = cmd.chars().filter(|c| *c == '=').count();
     if count > 1 {
         return "Command contains more than one environment variable assignment (parsing issue)"
@@ -407,76 +521,6 @@ fn env_var_eval(state: &ShellState, cmd: String) -> String {
     "Invalid environment variable operation".to_owned()
 }
 
-fn special_eval(state: &mut ShellState, cmd: String) -> String {
-    let mut result: String = String::new();
-    let commands: Vec<String> = cmd.split(';').map(|s| s.trim().to_owned()).collect();
-
-    for command in commands {
-        if command.contains("|") {
-            result = pipe_eval(command);
-        } else if command.contains(">") {
-            result = out_redir_eval(state, command);
-        } else {
-            result = eval(state, command);
-        }
-        print(result.clone());
-    }
-    result
-}
-
-fn pipe_eval(cmd: String) -> String {
-    let parts: Vec<String> = cmd.split('|').map(|s| s.trim().to_owned()).collect();
-
-    let mut input: String = String::new();
-    for part in parts {
-        let mut command_parts: Vec<String> = part.split_whitespace().map(String::from).collect();
-        if !input.is_empty() {
-            command_parts.push(input);
-        }
-        input = execute_external_command(&command_parts[0], &command_parts);
-    }
-    input
-}
-
-fn out_redir_eval(state: &mut ShellState, cmd: String) -> String {
-    let parts: Vec<String> = if cmd.contains("2>>") {
-        cmd.splitn(2, "2>>").map(|s| s.trim().to_owned()).collect()
-    } else if cmd.contains(">>") {
-        cmd.splitn(2, ">>").map(|s| s.trim().to_owned()).collect()
-    } else if cmd.contains("2>") {
-        cmd.splitn(2, "2>").map(|s| s.trim().to_owned()).collect()
-    } else {
-        cmd.splitn(2, ">").map(|s| s.trim().to_owned()).collect()
-    };
-
-    if parts.len() != 2 {
-        return "Invalid output redirection syntax".to_owned();
-    }
-
-    let command: String = parts[0].clone();
-    let file_path: String = parts[1].clone();
-    let append_mode: bool = cmd.contains(">>");
-
-    let mut file_options: OpenOptions = OpenOptions::new();
-    file_options.write(true).create(true);
-    if append_mode {
-        file_options.append(true);
-    } else {
-        file_options.truncate(true);
-    }
-
-    match file_options.open(&file_path) {
-        Ok(mut file) => {
-            let output: String = eval(state, command);
-            match file.write_all(output.as_bytes()) {
-                Ok(_) => NO_RESULT.to_owned(),
-                Err(e) => format!("Failed to write to file: {}", e),
-            }
-        }
-        Err(e) => format!("Failed to open file: {}", e),
-    }
-}
-
 fn handle_history() -> String {
     let history_file: PathBuf = get_history_file_path();
     match fs::read_to_string(history_file) {
@@ -488,6 +532,78 @@ fn handle_history() -> String {
         }
         Err(e) => format!("Failed to read history: {}", e),
     }
+}
+
+fn handle_alias(cmd_parts: &[String]) -> String {
+    let alias_file_path = get_alias_file_path();
+    let mut aliases = load_aliases(&alias_file_path);
+
+    if cmd_parts.len() == 1 {
+        // List all aliases
+        if aliases.is_empty() {
+            return "No aliases defined.".to_owned();
+        }
+        return aliases.iter()
+            .map(|(k, v)| format!("alias {}='{}'", k, v))
+            .collect::<Vec<String>>()
+            .join("\n");
+    } else {
+        let alias_str = cmd_parts[1..].join(" ");
+        if let Some(pos) = alias_str.find('=') {
+            let (name, command) = alias_str.split_at(pos);
+            let name = name.trim();
+            let command = command[1..].trim().trim_matches('\'').trim_matches('"');
+            aliases.insert(name.to_string(), command.to_string());
+            save_aliases(&alias_file_path, &aliases);
+            return format!("Alias '{}' created.", name);
+        } else {
+            // If no '=' is found, treat it as a query for a specific alias
+            if let Some(command) = aliases.get(&alias_str) {
+                return format!("alias {}='{}'", alias_str, command);
+            } else {
+                return format!("Alias '{}' not found.", alias_str);
+            }
+        }
+    }
+}
+
+fn handle_remove_alias(cmd_parts: &[String]) -> String {
+    if cmd_parts.len() != 2 {
+        return "Usage: rmalias <alias_name>".to_owned();
+    }
+
+    let alias_name = &cmd_parts[1];
+    let alias_file_path = get_alias_file_path();
+    let mut aliases = load_aliases(&alias_file_path);
+
+    if aliases.remove(alias_name).is_some() {
+        save_aliases(&alias_file_path, &aliases);
+        format!("Alias '{}' removed.", alias_name)
+    } else {
+        format!("Alias '{}' not found.", alias_name)
+    }
+}
+
+fn load_aliases(path: &PathBuf) -> HashMap<String, String> {
+    let mut aliases = HashMap::new();
+    if let Ok(contents) = fs::read_to_string(path) {
+        for line in contents.lines() {
+            if let Some(pos) = line.find('=') {
+                let (name, command) = line.split_at(pos);
+                aliases.insert(name.trim().to_string(), command[1..].trim().to_string());
+            }
+        }
+    }
+    aliases
+}
+
+fn save_aliases(path: &PathBuf, aliases: &HashMap<String, String>) {
+    let content: String = aliases
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<String>>()
+        .join("\n");
+    fs::write(path, content).expect("Unable to write alias file");
 }
 
 fn handle_cp(cmd_parts: &[String]) -> String {
@@ -618,7 +734,7 @@ async fn handle_nash_args(args: Vec<String>) {
 
     // Handle other command-line arguments
     if args.contains(&"--version".to_string()) {
-        println!("v0.0.7");
+        println!("v0.0.9.5");
         return;
     }
 
@@ -648,12 +764,6 @@ async fn handle_nash_args(args: Vec<String>) {
         }
         return;
     }
-    /* 
-    if args.contains(&"--update-system".to_string())
-    {
-        update_system(identify_system());
-    }
-    */
     // If no recognized arguments, print usage
     print_usage();
 }
@@ -693,18 +803,6 @@ async fn get_remote_version() -> String {
         .trim()
         .to_string()
 }
-
-// fn update_system(system: String)
-// {
-//     // Use user's system's default package manager and any custom ones to update (i.e. sudo apt update && sudo apt full-upgrade or pacman -Syu and yay -Syu)
-//     todo!();
-// }
-
-// fn identify_system()
-// {
-//     // Return user system, such as Arch, Fedora, Debian, etc.
-//     todo!();
-// }
 
 async fn update_nash() {
     // Check if git is installed
@@ -815,7 +913,7 @@ fn execute_file(state: &ShellState, path: &str, args: &[String]) -> String {
                     String::from_utf8_lossy(&output.stdout).into_owned()
                 } else {
                     format!(
-                        "Command failed: {}",
+                        "Program failed and output error: {}",
                         String::from_utf8_lossy(&output.stderr)
                     )
                 }

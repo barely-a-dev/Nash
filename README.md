@@ -27,7 +27,6 @@ Nash is a simple shell written in Rust, designed to provide a modern command-lin
 - Output redirection and command piping
 - Command and file autocompletion
 - External command execution support
-- Self-updating capability
 
 ## Installation
 
@@ -51,14 +50,6 @@ Nash is a simple shell written in Rust, designed to provide a modern command-lin
    chmod +x ./install.sh && ./install.sh
    ```
 
-### Automated Installation
-
-1. Download the latest release from [https://github.com/barely-a-dev/Nash/releases](https://github.com/barely-a-dev/Nash/releases)
-2. Run it with force update flags:
-   ```
-   cd /home/<username>/Downloads && chmod +x nash && nash --update -f
-   ```
-
 ## Usage
 
 After installation, you can start Nash by typing `nash` in your terminal.
@@ -66,7 +57,7 @@ After installation, you can start Nash by typing `nash` in your terminal.
 ### Command-line Options
 
 - `--version`: Display the current version of Nash
-- `--update`: Check for updates and install if available
+- `--update`: Check for updates and install if available (WIP, currently broken)
 - `-f, --force`: Force the update operation even if no new version is detected
 - `<script>`: Run the specified script file (experimental, use with caution)
 
@@ -80,7 +71,9 @@ After installation, you can start Nash by typing `nash` in your terminal.
 - `mkdir <directory>`: Create a new directory
 - `history`: Display command history
 - `exit`: Exit the shell
-- `summon <command>`: Open an external command in a new terminal window
+- `summon <command>`: Open an *external* command in a new terminal window (internal commands not yet supported. Planned for v0.1.1 after the major bug fixing of 0.1.0)
+- `alias identifier=original`: Create an alias for a command
+- `rmalias identifier`: Remove an alias for a command
 
 ### Special Features
 
@@ -91,7 +84,7 @@ After installation, you can start Nash by typing `nash` in your terminal.
 
 ## Development Status
 
-Nash is currently in early development (v0.0.7). While it's functional for basic use, many features are still being implemented or improved.
+Nash is currently in early development (v0.0.9.5). While it's functional for basic use, many features are still being implemented or improved.
 
 ## Contributing
 
@@ -107,22 +100,35 @@ If you're not sure where to start, check out the [issues](https://github.com/bar
 
 ## Roadmap
 
+### Checklist
+
 The following features and improvements are planned for future releases:
 (Note: "-" means WIP and partially implemented but unstable, while "/" means WIP but not public. ✔ of course means implemented.)
 - [-] Environment variables management system
-- [-] Enhanced command auto-completion
+- [/] Enhanced command auto-completion
 - [ ] Robust configuration system
 - [ ] Quoting and escaping mechanisms
-- [ ] Alias command support
+- [✔] Alias command support
 - [ ] Scripting capabilities (if, elif, else, for, while, functions, variables)
 - [ ] Wildcards and regex support
-- [ ] Enhanced command-line options
+- [-] Enhanced command-line options
 - [ ] Improved argument handling for built-in commands
 - [✔] Support for popular, complex commands and text editors (e.g., Nano, Vim)
+- [-] Self-updating capability
+
+### Notable version's planned updates
+- 0.1.0: Major bug fix and heavy testing. Will not be released for weeks or months.
+
+- 1.0.0: The point when the project will be comparable to Bash.
+
+# Final goal
+
+## The final goal of nash is:
+### [-] Be comparable to or better than Bash in convenience, performance, and overall user-experience.
 
 ## Disclaimer
 
-Nash is a work in progress and may not be suitable for production use. Use at your own risk. The project is developed by an amateur, self-taught developer primarily experienced in C#. As such, the code quality may vary, and improvements are constantly being made based on feedback and contributions from the community.
+Nash is a work in progress and may not be suitable for production use. Use at your own risk. The project is developed by an amateur, self-taught developer primarily experienced in C#; not Rust, the project's language. As such, the code quality may vary heavily.
 
 ## License
 
