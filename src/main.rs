@@ -258,8 +258,10 @@ fn expand_env_vars(cmd: &str) -> String {
 }
 
 fn handle_summon(cmd_parts: &[String]) -> String {
-    if cmd_parts.len() == 2 {
+    if cmd_parts.len() >= 2 {
         let executable: &String = &cmd_parts[1];
+        let args: Vec<&String> = cmd_parts.iter().skip(2).collect();
+
         // List of common terminal emulators
         let terminals: Vec<&str> = vec![
             "x-terminal-emulator",
@@ -299,12 +301,26 @@ fn handle_summon(cmd_parts: &[String]) -> String {
         // Use the first installed terminal in the list
         let terminal: &str = &installed_terminals[0];
         let result: Result<process::Child, Error> = match terminal {
-            "gnome-terminal" => Command::new(terminal)
-                .args(&["--", "bash", "-c", executable])
-                .spawn(),
-            "warp" => Command::new(terminal).args(&["--cmd", executable]).spawn(),
-            "termux" => Command::new(terminal).args(&["-e", executable]).spawn(),
-            _ => Command::new(terminal).args(&["-e", executable]).spawn(),
+            "gnome-terminal" => {
+                let mut cmd = vec!["bash", "-c", executable];
+                cmd.extend(args.iter().map(|s| s.as_str()));
+                Command::new(terminal).args(&["--"]).args(&cmd).spawn()
+            },
+            "warp" => {
+                let mut cmd = vec![executable.as_str()];
+                cmd.extend(args.iter().map(|s| s.as_str()));
+                Command::new(terminal).arg("--cmd").args(&cmd).spawn()
+            },
+            "termux" => {
+                let mut cmd = vec![executable.as_str()];
+                cmd.extend(args.iter().map(|s| s.as_str()));
+                Command::new(terminal).arg("-e").args(&cmd).spawn()
+            },
+            _ => {
+                let mut cmd = vec![executable.as_str()];
+                cmd.extend(args.iter().map(|s| s.as_str()));
+                Command::new(terminal).arg("-e").args(&cmd).spawn()
+            },
         };
 
         match result {
@@ -312,9 +328,10 @@ fn handle_summon(cmd_parts: &[String]) -> String {
             Err(e) => return format!("An error occurred: {}", e),
         }
     } else {
-        "Usage: summon <external command or path to executable file>".to_owned()
+        "Usage: summon <external command or path to executable file> [args...]".to_owned()
     }
 }
+
 
 fn env_var_eval(state: &ShellState, cmd: String) -> String {
     let count: usize = cmd.chars().filter(|c| *c == '=').count();
