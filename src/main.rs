@@ -423,7 +423,7 @@ async fn handle_nash_args(args: Vec<String>) {
         return;
     }
 
-    let force_update = args.contains(&"-f".to_string()) || args.contains(&"--force".to_string());
+    let force_update: bool = args.contains(&"-f".to_string()) || args.contains(&"--force".to_string());
 
     // Handle other command-line arguments
     if args.contains(&"--version".to_string()) {
@@ -435,8 +435,8 @@ async fn handle_nash_args(args: Vec<String>) {
         println!("Checking for updates...");
 
         // Compare local and remote version
-        let local_ver = get_local_version();
-        let remote_ver = get_remote_version().await;
+        let local_ver: String = get_local_version();
+        let remote_ver: String = get_remote_version().await;
 
         if local_ver.trim() != remote_ver.trim() {
             println!("Update detected. Local version: {}, Remote version: {}", local_ver, remote_ver);
