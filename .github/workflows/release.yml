@@ -1,0 +1,52 @@
+name: Build, Test, and Release Nash
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-test-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Run install script
+      run: |
+        chmod +x ./install.sh
+        ./install.sh
+
+    - name: Run nash command
+      run: nash --version
+      
+    - name: Get version and run count
+      id: version
+      run: |
+        VERSION=$(cat ver)
+        RUN_COUNT=$(cat ver.count || echo 0)
+        NEW_COUNT=$((RUN_COUNT + 1))
+        echo $NEW_COUNT > ver.count
+        echo "::set-output name=version::${VERSION}.${NEW_COUNT}"
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ steps.version.outputs.version }}
+        release_name: Release ${{ steps.version.outputs.version }}
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./target/release/Nash
+        asset_name: Nash
+        asset_content_type: application/octet-stream
