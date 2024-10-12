@@ -3,9 +3,8 @@
 pub mod editing;
 
 use crate::editing::*;
-use git2::Repository;
-use tokio::runtime::Runtime;
 use dirs;
+use git2::Repository;
 use rustyline::{
     completion::{Completer, Pair},
     error::ReadlineError,
@@ -16,10 +15,16 @@ use rustyline::{
 };
 use rustyline_derive::Helper;
 use std::{
-    env, ffi::OsStr, fs::{self, create_dir, remove_file, OpenOptions}, io::{self, Error, Write}, path::{Path, PathBuf}, process::{self, Command}, borrow::Cow
+    borrow::Cow,
+    env,
+    ffi::OsStr,
+    fs::{self, create_dir, remove_file, OpenOptions},
+    io::{self, Error, Write},
+    path::{Path, PathBuf},
+    process::{self, Command},
 };
+use tokio::runtime::Runtime;
 use whoami::fallible;
-
 
 const NO_RESULT: &str = "";
 
@@ -35,7 +40,10 @@ fn main() {
         env::set_var("0", "nash");
         if args.len() <= 1 {
             let mut state: ShellState = ShellState {
-                cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")).to_string_lossy().to_string(),
+                cwd: std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("/"))
+                    .to_string_lossy()
+                    .to_string(),
                 hostname: fallible::hostname().unwrap(),
                 username: fallible::username().unwrap(),
             };
@@ -57,7 +65,12 @@ struct ShellHelper {
 impl Completer for ShellHelper {
     type Candidate = Pair;
 
-    fn complete(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Result<(usize, Vec<Pair>), ReadlineError> {
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        ctx: &Context<'_>,
+    ) -> Result<(usize, Vec<Pair>), ReadlineError> {
         self.completer.complete(line, pos, ctx)
     }
 }
@@ -77,7 +90,11 @@ impl Hinter for ShellHelper {
 }
 
 impl Highlighter for ShellHelper {
-    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, prompt: &'p str, default: bool) -> Cow<'b, str> {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
+        &'s self,
+        prompt: &'p str,
+        default: bool,
+    ) -> Cow<'b, str> {
         self.highlighter.highlight_prompt(prompt, default)
     }
 
@@ -101,7 +118,7 @@ fn repl(state: &mut ShellState) {
         highlighter: LineHighlighter::new(),
         hinter: CommandHinter::new(),
         validator: MatchingBracketValidator::new(),
-    };    
+    };
     let mut rl: Editor<ShellHelper> = Editor::new();
     rl.set_helper(Some(helper));
 
@@ -120,17 +137,19 @@ fn repl(state: &mut ShellState) {
 
                 // Update the current directory in the AutoCompleter
                 if let Some(helper) = rl.helper_mut() {
-                    helper.completer.update_current_dir(PathBuf::from(&state.cwd));
+                    helper
+                        .completer
+                        .update_current_dir(PathBuf::from(&state.cwd));
                 }
-            },
+            }
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");
                 break;
-            },
+            }
             Err(ReadlineError::Eof) => {
                 println!("CTRL-D");
                 break;
-            },
+            }
             Err(err) => {
                 println!("Error: {:?}", err);
                 break;
@@ -154,11 +173,15 @@ fn get_history_file_path() -> PathBuf {
 
 fn eval(state: &mut ShellState, cmd: String) -> String {
     let chars_to_check: [char; 3] = [';', '|', '>'];
-    
+
     if !cmd.contains(|c: char| chars_to_check.contains(&c)) {
         let expanded_cmd = expand_env_vars(&cmd);
-        let cmd_parts: Vec<String> = expanded_cmd.trim().split_whitespace().map(String::from).collect();
-        
+        let cmd_parts: Vec<String> = expanded_cmd
+            .trim()
+            .split_whitespace()
+            .map(String::from)
+            .collect();
+
         if cmd_parts.is_empty() {
             return "Empty command".to_owned();
         }
@@ -233,9 +256,23 @@ fn handle_summon(cmd_parts: &[String]) -> String {
         let executable: &String = &cmd_parts[1];
         // List of common terminal emulators
         let terminals: Vec<&str> = vec![
-            "x-terminal-emulator", "gnome-terminal", "konsole", "xterm", "urxvt", "alacritty",
-            "warp", "termux", "qterminal", "kitty", "tilix", "terminator", "rxvt", "st",
-            "terminology", "hyper", "iterm2"
+            "x-terminal-emulator",
+            "gnome-terminal",
+            "konsole",
+            "xterm",
+            "urxvt",
+            "alacritty",
+            "warp",
+            "termux",
+            "qterminal",
+            "kitty",
+            "tilix",
+            "terminator",
+            "rxvt",
+            "st",
+            "terminology",
+            "hyper",
+            "iterm2",
         ];
 
         let mut installed_terminals: Vec<&str> = Vec::new();
@@ -259,15 +296,9 @@ fn handle_summon(cmd_parts: &[String]) -> String {
             "gnome-terminal" => Command::new(terminal)
                 .args(&["--", "bash", "-c", executable])
                 .spawn(),
-            "warp" => Command::new(terminal)
-                .args(&["--cmd", executable])
-                .spawn(),
-            "termux" => Command::new(terminal)
-                .args(&["-e", executable])
-                .spawn(),
-            _ => Command::new(terminal)
-                .args(&["-e", executable])
-                .spawn(),
+            "warp" => Command::new(terminal).args(&["--cmd", executable]).spawn(),
+            "termux" => Command::new(terminal).args(&["-e", executable]).spawn(),
+            _ => Command::new(terminal).args(&["-e", executable]).spawn(),
         };
 
         match result {
@@ -279,11 +310,11 @@ fn handle_summon(cmd_parts: &[String]) -> String {
     }
 }
 
-
 fn env_var_eval(state: &ShellState, cmd: String) -> String {
     let count: usize = cmd.chars().filter(|c| *c == '=').count();
     if count > 1 {
-        return "Command contains more than one environment variable assignment (parsing issue)".to_owned();
+        return "Command contains more than one environment variable assignment (parsing issue)"
+            .to_owned();
     } else if count == 1 {
         // Handle environment variable assignment
         let parts: Vec<String> = cmd.split('=').map(|s| s.trim().to_owned()).collect();
@@ -321,7 +352,7 @@ fn env_var_eval(state: &ShellState, cmd: String) -> String {
 fn special_eval(state: &mut ShellState, cmd: String) -> String {
     let mut result: String = String::new();
     let commands: Vec<String> = cmd.split(';').map(|s| s.trim().to_owned()).collect();
-    
+
     for command in commands {
         if command.contains("|") {
             result = pipe_eval(command);
@@ -336,11 +367,8 @@ fn special_eval(state: &mut ShellState, cmd: String) -> String {
 }
 
 fn pipe_eval(cmd: String) -> String {
-    let parts: Vec<String> = cmd
-        .split('|')
-        .map(|s| s.trim().to_owned())
-        .collect();
-    
+    let parts: Vec<String> = cmd.split('|').map(|s| s.trim().to_owned()).collect();
+
     let mut input: String = String::new();
     for part in parts {
         let mut command_parts: Vec<String> = part.split_whitespace().map(String::from).collect();
@@ -386,7 +414,7 @@ fn out_redir_eval(state: &mut ShellState, cmd: String) -> String {
                 Ok(_) => NO_RESULT.to_owned(),
                 Err(e) => format!("Failed to write to file: {}", e),
             }
-        },
+        }
         Err(e) => format!("Failed to open file: {}", e),
     }
 }
@@ -399,58 +427,51 @@ fn handle_history() -> String {
                 println!("{}: {}", i + 1, line);
             }
             NO_RESULT.to_owned()
-        },
+        }
         Err(e) => format!("Failed to read history: {}", e),
     }
 }
 
 fn handle_cp(cmd_parts: &[String]) -> String {
     match cmd_parts.len() {
-        3 => {
-            match copy_item(&cmd_parts[1], &cmd_parts[2]) {
-                Ok(_) => "Successfully copied item.".to_owned(),
-                Err(e) => format!("An error occurred: {}", e)
-            }
-        }
-        0..=2 => "Incorrect number of arguments. Usage: cp <source_path> <dest_path> [arguments]".to_owned(),
-        _ => "Copy with arguments not implemented yet.".to_owned()
+        3 => match copy_item(&cmd_parts[1], &cmd_parts[2]) {
+            Ok(_) => "Successfully copied item.".to_owned(),
+            Err(e) => format!("An error occurred: {}", e),
+        },
+        0..=2 => "Incorrect number of arguments. Usage: cp <source_path> <dest_path> [arguments]"
+            .to_owned(),
+        _ => "Copy with arguments not implemented yet.".to_owned(),
     }
 }
 
 fn handle_mv(cmd_parts: &[String]) -> String {
     match cmd_parts.len() {
-        3 => {
-            match move_item(&cmd_parts[1], &cmd_parts[2]) {
-                Ok(_) => "Successfully moved item.".to_owned(),
-                Err(e) => format!("An error occurred: {}", e)
-            }
-        }
+        3 => match move_item(&cmd_parts[1], &cmd_parts[2]) {
+            Ok(_) => "Successfully moved item.".to_owned(),
+            Err(e) => format!("An error occurred: {}", e),
+        },
         0..=2 => "Incorrect number of arguments. Usage: mv <source_path> <dest_path>".to_owned(),
-        _ => "Args not implemented yet.".to_owned()
+        _ => "Args not implemented yet.".to_owned(),
     }
 }
 
 fn handle_rm(cmd_parts: &[String]) -> String {
     match cmd_parts.len() {
-        2 => {
-            match remove_file(&cmd_parts[1]) {
-                Ok(_) => "Successfully removed file.".to_owned(),
-                Err(e) => format!("An error occurred: {}", e)
-            }
-        }
-        _ => "Incorrect number of arguments. Usage: rm <file_path>".to_owned()
+        2 => match remove_file(&cmd_parts[1]) {
+            Ok(_) => "Successfully removed file.".to_owned(),
+            Err(e) => format!("An error occurred: {}", e),
+        },
+        _ => "Incorrect number of arguments. Usage: rm <file_path>".to_owned(),
     }
 }
 
 fn handle_mkdir(cmd_parts: &[String]) -> String {
     match cmd_parts.len() {
-        2 => {
-            match create_dir(&cmd_parts[1]) {
-                Ok(_) => "Successfully created directory.".to_owned(),
-                Err(e) => format!("An error occurred: {}", e)
-            }
-        }
-        _ => "Incorrect number of arguments. Usage: mkdir <directory_path>".to_owned()
+        2 => match create_dir(&cmd_parts[1]) {
+            Ok(_) => "Successfully created directory.".to_owned(),
+            Err(e) => format!("An error occurred: {}", e),
+        },
+        _ => "Incorrect number of arguments. Usage: mkdir <directory_path>".to_owned(),
     }
 }
 
@@ -464,8 +485,8 @@ fn handle_ls(state: &ShellState, cmd_parts: &[String]) -> String {
                 PathBuf::from(&state.cwd).join(&cmd_parts[1])
             };
             list_directory(path.to_str().unwrap_or(""))
-        },
-        _ => "Incorrect number of arguments. Usage: ls [directory_path]".to_owned()
+        }
+        _ => "Incorrect number of arguments. Usage: ls [directory_path]".to_owned(),
     }
 }
 
@@ -479,10 +500,13 @@ fn handle_cd(state: &mut ShellState, cmd_parts: &[String]) -> String {
             } else {
                 "Unable to determine home directory".to_owned()
             }
-        },
+        }
         2 => {
             let new_path: PathBuf = if cmd_parts[1] == ".." {
-                PathBuf::from(&state.cwd).parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("/"))
+                PathBuf::from(&state.cwd)
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("/"))
             } else if cmd_parts[1].starts_with('/') {
                 PathBuf::from(&cmd_parts[1])
             } else {
@@ -495,26 +519,29 @@ fn handle_cd(state: &mut ShellState, cmd_parts: &[String]) -> String {
                     Ok(canonical_path) => {
                         state.cwd = canonical_path.to_string_lossy().into_owned();
                         NO_RESULT.to_owned()
-                    },
+                    }
                     Err(e) => format!("Error resolving path: {}", e),
                 }
             } else {
                 format!("Directory not found: {}", new_path.display())
             }
-        },
-        _ => "Usage: cd [path]".to_owned()
+        }
+        _ => "Usage: cd [path]".to_owned(),
     }
 }
 
 async fn handle_nash_args(args: Vec<String>) {
-    // Check if arg 1 is a path, if so, run it as a series of commands (like bash's .sh running impl) (scripting) 
+    // Check if arg 1 is a path, if so, run it as a series of commands (like bash's .sh running impl) (scripting)
     // PLACEHOLDER, WILL NOT WORK LIKE INTENDED!!
     if args.len() > 1 && Path::new(&args[1]).exists() {
         let script_path: &String = &args[1];
         match fs::read_to_string(script_path) {
             Ok(contents) => {
                 let mut state: ShellState = ShellState {
-                    cwd: env::current_dir().unwrap_or_else(|_| PathBuf::from("/")).to_string_lossy().to_string(),
+                    cwd: env::current_dir()
+                        .unwrap_or_else(|_| PathBuf::from("/"))
+                        .to_string_lossy()
+                        .to_string(),
                     hostname: fallible::hostname().unwrap(),
                     username: fallible::username().unwrap(),
                 };
@@ -522,13 +549,14 @@ async fn handle_nash_args(args: Vec<String>) {
                     let result: String = eval(&mut state, line.to_string());
                     print(result);
                 }
-            },
+            }
             Err(e) => eprintln!("Failed to read script file: {}", e),
         }
         return;
     }
 
-    let force_update: bool = args.contains(&"-f".to_string()) || args.contains(&"--force".to_string());
+    let force_update: bool =
+        args.contains(&"-f".to_string()) || args.contains(&"--force".to_string());
 
     // Handle other command-line arguments
     if args.contains(&"--version".to_string()) {
@@ -545,13 +573,18 @@ async fn handle_nash_args(args: Vec<String>) {
             let remote_ver: String = get_remote_version().await;
 
             if local_ver.trim() != remote_ver.trim() {
-                println!("Update detected. Local version: {}, Remote version: {}", local_ver, remote_ver);
+                println!(
+                    "Update detected. Local version: {}, Remote version: {}",
+                    local_ver, remote_ver
+                );
                 update_nash().await;
             } else {
-                println!("Nash is already up to date in major updates (version {}).", local_ver);
+                println!(
+                    "Nash is already up to date in major updates (version {}).",
+                    local_ver
+                );
             }
-        }
-        else {
+        } else {
             println!("Updating nash without version check as force flag was used.");
             update_nash().await;
         }
@@ -577,25 +610,45 @@ fn get_local_version() -> String {
             return String::from_utf8_lossy(&output.stdout).trim().to_string();
         }
         Err(e) => {
-            eprintln!("An error occurred when trying to get the version of nash: {}", e);
+            eprintln!(
+                "An error occurred when trying to get the version of nash: {}",
+                e
+            );
             return format!("Failed to get nash version: {}", e);
         }
     }
 }
 async fn get_remote_version() -> String {
     let url: &str = "https://raw.githubusercontent.com/barely-a-dev/Nash/refs/heads/main/ver";
-    let response = reqwest::get(url).await.expect("Failed to fetch remote version");
-    response.text().await.expect("Failed to read remote version").trim().to_string()
+    let response = reqwest::get(url)
+        .await
+        .expect("Failed to fetch remote version");
+    response
+        .text()
+        .await
+        .expect("Failed to read remote version")
+        .trim()
+        .to_string()
 }
 
 async fn update_nash() {
     // Check if git and Rust are installed
-    if !Command::new("git").arg("--version").status().unwrap().success() {
+    if !Command::new("git")
+        .arg("--version")
+        .status()
+        .unwrap()
+        .success()
+    {
         println!("Git is not installed. Please install Git and try again.");
         return;
     }
 
-    if !Command::new("rustc").arg("--version").status().unwrap().success() {
+    if !Command::new("rustc")
+        .arg("--version")
+        .status()
+        .unwrap()
+        .success()
+    {
         println!("Rust is not installed. Please install [Rust](https://www.rust-lang.org/tools/install) and try again.");
         return;
     }
@@ -618,13 +671,23 @@ async fn update_nash() {
     env::set_current_dir(&temp_dir).expect("Failed to change directory");
 
     // Build the project
-    if !Command::new("cargo").args(&["build", "--release"]).status().unwrap().success() {
+    if !Command::new("cargo")
+        .args(&["build", "--release"])
+        .status()
+        .unwrap()
+        .success()
+    {
         println!("Failed to build the project");
         return;
     }
 
     // Copy the binary to /usr/bin/nash
-    if !Command::new("sudo").args(&["cp", "target/release/nash", "/usr/bin/nash"]).status().unwrap().success() {
+    if !Command::new("sudo")
+        .args(&["cp", "target/release/nash", "/usr/bin/nash"])
+        .status()
+        .unwrap()
+        .success()
+    {
         println!("Failed to copy the binary to /usr/bin/nash");
         return;
     }
@@ -639,11 +702,10 @@ fn execute_external_command(cmd: &str, cmd_parts: &[String]) -> String {
     if let Some(path) = find_command_in_path(cmd) {
         let output: Result<process::Output, Error> = if cmd_parts.len() > 1 {
             Command::new(path)
-                .args(&cmd_parts[1..])  // Use arguments if they exist
+                .args(&cmd_parts[1..]) // Use arguments if they exist
                 .output()
         } else {
-            Command::new(path)
-                .output()
+            Command::new(path).output()
         };
 
         match output {
@@ -651,7 +713,10 @@ fn execute_external_command(cmd: &str, cmd_parts: &[String]) -> String {
                 if output.status.success() {
                     String::from_utf8_lossy(&output.stdout).into_owned()
                 } else {
-                    format!("Command failed: {}", String::from_utf8_lossy(&output.stderr))
+                    format!(
+                        "Command failed: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    )
                 }
             }
             Err(e) => format!("Failed to execute command: {}", e),
@@ -669,16 +734,17 @@ fn execute_file(state: &ShellState, path: &str, args: &[String]) -> String {
     };
 
     if full_path.is_file() {
-        let output: Result<process::Output, Error> = Command::new(&full_path)
-            .args(args)
-            .output();
+        let output: Result<process::Output, Error> = Command::new(&full_path).args(args).output();
 
         match output {
             Ok(output) => {
                 if output.status.success() {
                     String::from_utf8_lossy(&output.stdout).into_owned()
                 } else {
-                    format!("Command failed: {}", String::from_utf8_lossy(&output.stderr))
+                    format!(
+                        "Command failed: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    )
                 }
             }
             Err(e) => format!("Failed to execute file: {}", e),
@@ -687,7 +753,6 @@ fn execute_file(state: &ShellState, path: &str, args: &[String]) -> String {
         format!("File not found or not executable: {}", full_path.display())
     }
 }
-
 
 fn find_command_in_path(cmd: &str) -> Option<String> {
     if let Ok(path) = env::var("PATH") {
@@ -704,14 +769,17 @@ fn find_command_in_path(cmd: &str) -> Option<String> {
 fn list_directory(path: &str) -> String {
     let mut out: String = String::new();
     let dir_path: &Path = Path::new(path);
-    if dir_path.is_file()
-    {
-        let file_name: &OsStr = dir_path.file_name().expect("Could not get file name of file passed to ls.");
-        let fn_str: &str = file_name.to_str().expect("Could not convert OsStr to &str.");
+    if dir_path.is_file() {
+        let file_name: &OsStr = dir_path
+            .file_name()
+            .expect("Could not get file name of file passed to ls.");
+        let fn_str: &str = file_name
+            .to_str()
+            .expect("Could not convert OsStr to &str.");
         out.push_str(&fn_str);
-        return out
+        return out;
     }
-    
+
     match fs::read_dir(dir_path) {
         Ok(entries) => {
             for entry in entries {
