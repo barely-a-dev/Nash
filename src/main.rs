@@ -33,7 +33,7 @@ fn main() {
     runtime.block_on(async {
         let args: Vec<String> = std::env::args().collect();
         if args.len() <= 1 {
-            let mut state = ShellState {
+            let mut state: ShellState = ShellState {
                 cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")).to_string_lossy().to_string(),
                 hostname: fallible::hostname().unwrap(),
                 username: fallible::username().unwrap(),
@@ -95,7 +95,7 @@ impl Highlighter for ShellHelper {
 
 fn repl(state: &mut ShellState) {
     let history_file: PathBuf = get_history_file_path();
-    let helper = ShellHelper {
+    let helper: ShellHelper = ShellHelper {
         completer: AutoCompleter::new(PathBuf::from(&state.cwd)),
         highlighter: LineHighlighter::new(),
         hinter: CommandHinter::new(),
@@ -451,21 +451,23 @@ async fn handle_nash_args(args: Vec<String>) {
     }
 
     if args.contains(&"--update".to_string()) {
-        println!("Checking for updates...");
+        if !force_update {
+            println!("Checking for updates...");
 
-        // Compare local and remote version
-        let local_ver: String = get_local_version();
-        let remote_ver: String = get_remote_version().await;
+            // Compare local and remote version
+            let local_ver: String = get_local_version();
+            let remote_ver: String = get_remote_version().await;
 
-        if local_ver.trim() != remote_ver.trim() {
-            println!("Update detected. Local version: {}, Remote version: {}", local_ver, remote_ver);
-            update_nash().await;
-        } else {
-            println!("Nash is already up to date in major updates (version {}).", local_ver);
-            if force_update {
-                println!("Updating anyway as -f or --force was used");
+            if local_ver.trim() != remote_ver.trim() {
+                println!("Update detected. Local version: {}, Remote version: {}", local_ver, remote_ver);
                 update_nash().await;
+            } else {
+                println!("Nash is already up to date in major updates (version {}).", local_ver);
             }
+        }
+        else {
+            println!("Updating nash without version check as force flag was used.");
+            update_nash().await;
         }
         return;
     }
@@ -484,14 +486,16 @@ fn print_usage() {
 }
 
 fn get_local_version() -> String {
-    let output: process::Output = Command::new("nash")
-        .arg("--version")
-        .output()
-        .expect("Failed to execute nash --version");
-
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
+    match Command::new("nash").arg("--version").output() {
+        Ok(output) => {
+            return String::from_utf8_lossy(&output.stdout).trim().to_string();
+        }
+        Err(e) => {
+            eprintln!("An error occurred when trying to get the version of nash: {}", e);
+            return format!("Failed to get nash version: {}", e);
+        }
+    }
 }
-
 async fn get_remote_version() -> String {
     let url: &str = "https://raw.githubusercontent.com/barely-a-dev/Nash/refs/heads/main/ver";
     let response = reqwest::get(url).await.expect("Failed to fetch remote version");
