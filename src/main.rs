@@ -1,8 +1,8 @@
 // MAJOR TODOs: environment variables. (0=nash, echo $0 outs "nash"), command autocompletion, export for env vars, CONFIG, set/unset for setting config (easy?), quotes and escaping ('', "", \), alias command (easy)
 // Absolutely HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables), wildcards/regex (*, ?, []), command line options (-c, etc)/(handle_nash_args), ACTUAL ARGUMENTS FOR COMMANDS (like ls -a and rm -f instead of just ls and rm (I am not doing rm -r. It's stupid.))
-pub mod completion;
+pub mod editing;
 
-use crate::completion::AutoCompleter;
+use crate::editing::*;
 use git2::Repository;
 use tokio::runtime::Runtime;
 use dirs;
@@ -16,7 +16,7 @@ use rustyline::{
 };
 use rustyline_derive::Helper;
 use std::{
-    env, ffi::OsStr, fs::{self, create_dir, remove_file, OpenOptions}, io::{self, Error, Write}, path::{Path, PathBuf}, process::{self, Command}
+    env, ffi::OsStr, fs::{self, create_dir, remove_file, OpenOptions}, io::{self, Error, Write}, path::{Path, PathBuf}, process::{self, Command}, borrow::Cow
 };
 use whoami::fallible;
 
@@ -46,43 +46,62 @@ fn main() {
 }
 
 #[derive(Helper)]
-struct CompletionHelper {
+struct ShellHelper {
     completer: AutoCompleter,
+    highlighter: LineHighlighter,
+    hinter: CommandHinter,
     validator: MatchingBracketValidator,
 }
 
-impl Completer for CompletionHelper {
+impl Completer for ShellHelper {
     type Candidate = Pair;
 
-    fn complete(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Result<(usize, Vec<Pair>), rustyline::error::ReadlineError> {
+    fn complete(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Result<(usize, Vec<Pair>), ReadlineError> {
         self.completer.complete(line, pos, ctx)
     }
 }
 
-impl Validator for CompletionHelper {
+impl Validator for ShellHelper {
     fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
         self.validator.validate(ctx)
     }
 }
 
-impl Hinter for CompletionHelper {
+impl Hinter for ShellHelper {
     type Hint = String;
 
-    fn hint(&self, _line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<String> {
-        None
+    fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<String> {
+        self.hinter.hint(line, pos, ctx)
     }
 }
 
+impl Highlighter for ShellHelper {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, prompt: &'p str, default: bool) -> Cow<'b, str> {
+        self.highlighter.highlight_prompt(prompt, default)
+    }
 
-impl Highlighter for CompletionHelper {}
+    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+        self.highlighter.highlight_hint(hint)
+    }
+
+    fn highlight<'l>(&self, line: &'l str, pos: usize) -> Cow<'l, str> {
+        self.highlighter.highlight(line, pos)
+    }
+
+    fn highlight_char(&self, line: &str, pos: usize) -> bool {
+        self.highlighter.highlight_char(line, pos)
+    }
+}
 
 fn repl(state: &mut ShellState) {
     let history_file: PathBuf = get_history_file_path();
-    let helper: CompletionHelper = CompletionHelper {
-        completer: AutoCompleter::new(),
+    let helper = ShellHelper {
+        completer: AutoCompleter::new(PathBuf::from(&state.cwd)),
+        highlighter: LineHighlighter::new(),
+        hinter: CommandHinter::new(),
         validator: MatchingBracketValidator::new(),
-    };
-    let mut rl: Editor<CompletionHelper> = Editor::new();
+    };    
+    let mut rl: Editor<ShellHelper> = Editor::new();
     rl.set_helper(Some(helper));
 
     if rl.load_history(&history_file).is_err() {

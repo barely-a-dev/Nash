@@ -1,19 +1,19 @@
 use std::path::PathBuf;
 use rustyline::completion::{Completer, Pair};
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
 use rustyline::Context;
 use rustyline::Result;
 use std::fs::DirEntry;
 use std::io;
-use std::env;
+use std::borrow::Cow;
 
 pub struct AutoCompleter {
     current_dir: PathBuf,
     commands: Vec<String>,
 }
-
 impl AutoCompleter {
-    pub fn new() -> Self {
-        let current_dir: PathBuf = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    pub fn new(current_dir: PathBuf) -> Self {
         let commands: Vec<String> = vec![
             "cd".to_string(),
             "ls".to_string(),
@@ -94,4 +94,59 @@ fn extract_word(line: &str, pos: usize) -> (usize, &str) {
         start -= 1;
     }
     (start, &line[start..pos])
+}
+pub struct LineHighlighter;
+
+impl LineHighlighter {
+    pub fn new() -> Self {
+        LineHighlighter
+    }
+}
+
+impl Highlighter for LineHighlighter {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, prompt: &'p str, _default: bool) -> Cow<'b, str> {
+        Cow::Borrowed(prompt)
+    }
+
+    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+        Cow::Borrowed(hint)
+    }
+
+    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
+        Cow::Borrowed(line)
+    }
+
+    fn highlight_char(&self, _line: &str, _pos: usize) -> bool {
+        false
+    }
+}
+
+pub struct CommandHinter;
+
+impl CommandHinter {
+    pub fn new() -> Self {
+        CommandHinter
+    }
+}
+
+impl Hinter for CommandHinter {
+    type Hint = String;
+
+    fn hint(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Option<String> {
+        if line.is_empty() || pos < line.len() {
+            return None;
+        }
+
+        let command = line.split_whitespace().next()?;
+        match command {
+            "cd" => Some(" <directory>".to_string()),
+            "ls" => Some(" [directory]".to_string()),
+            "cp" => Some(" <source> <destination>".to_string()),
+            "mv" => Some(" <source> <destination>".to_string()),
+            "rm" => Some(" <file>".to_string()),
+            "mkdir" => Some(" <directory>".to_string()),
+            "summon" => Some(" <command>".to_string()),
+            _ => None,
+        }
+    }
 }
