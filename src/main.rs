@@ -740,7 +740,7 @@ async fn handle_nash_args(args: Vec<String>) {
 
     // Handle other command-line arguments
     if args.contains(&"--version".to_string()) {
-        println!("v0.0.9.5");
+        println!("v0.0.9.5.1");
         return;
     }
 
