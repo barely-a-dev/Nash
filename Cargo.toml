@@ -18,11 +18,6 @@ codegen-units = 1
 strip = true
 opt-level = "3"
 
-[package]
-name = "nash"
-version = "0.1.0"
-edition = "2021"
-
 [package.metadata.deb]
 maintainer = "barely-a-dev <nahman1234lol12@gmail.com>"
 copyright = "2024, Nash Project Contributors"
