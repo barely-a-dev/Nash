@@ -1,7 +1,7 @@
 [package]
 name = "nash"
 version = "0.0.9"
-edition = "2024"
+edition = "2021"
 description = "Nash - A Rust-based alternative to Bash"
 authors = ["barely-a-dev <nahman1234lol12@gmail.com>"]
 license = "GPL-3.0"
