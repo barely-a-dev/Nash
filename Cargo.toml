@@ -1,7 +1,12 @@
 [package]
 name = "nash"
 version = "0.0.9"
-edition = "2021"
+edition = "2024"
+description = "Nash - A Rust-based alternative to Bash"
+authors = ["barely-a-dev <nahman1234lol12@gmail.com>"]
+license = "GPL-3.0"
+readme = "README.md"
+
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -30,13 +35,6 @@ assets = [
     ["target/release/nash", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/nash/README", "644"],
 ]
-
-[package.metadata.arch]
-arch = ["x86_64"]
-depends = []
-description = "Nash - A Rust-based alternative to Bash"
-[package.metadata.rpm]
-package = "nash"
 
 [package.metadata.rpm.cargo]
 buildflags = ["--release"]
