@@ -232,6 +232,7 @@ fn eval(state: &mut ShellState, cmd: String) -> String {
         "summon" => handle_summon(&expanded_cmd_parts),
         "alias" => handle_alias(&expanded_cmd_parts),
         "rmalias" => handle_remove_alias(&expanded_cmd_parts),
+        "help" => show_help(),
         _ => {
             // If not a built-in command, execute as an external command
             let result = execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts);
@@ -241,6 +242,11 @@ fn eval(state: &mut ShellState, cmd: String) -> String {
             NO_RESULT.to_owned()
         }
     }
+}
+
+fn show_help() -> String
+{
+    "cd <directory>: Change the current directory\nls [directory]: List contents of a directory\ncp <source> <destination>: Copy files or directories\nmv <source> <destination>: Move files or directories\nrm <file>: Remove a file\nmkdir <directory>: Create a new directory\nhistory: Display command history\nexit: Exit the shell\nsummon <command>: Open an *external* command in a new terminal window (internal commands not yet supported. Planned for v0.1.1 after the major bug fixing of 0.1.0)\nalias <identifier>[=original]: Create an alias for a command\nrmalias <identifier>: Remove an alias for a command\nhelp: Display this".to_owned()
 }
 
 fn special_eval(state: &mut ShellState, cmd: String) -> String {

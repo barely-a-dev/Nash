@@ -72,8 +72,9 @@ After installation, you can start Nash by typing `nash` in your terminal.
 - `history`: Display command history
 - `exit`: Exit the shell
 - `summon <command>`: Open an *external* command in a new terminal window (internal commands not yet supported. Planned for v0.1.1 after the major bug fixing of 0.1.0)
-- `alias identifier=original`: Create an alias for a command
-- `rmalias identifier`: Remove an alias for a command
+- `alias <identifier>[=original]`: Create an alias for a command
+- `rmalias <identifier>`: Remove an alias for a command
+- `help`: Display a help menu similar to this
 
 ### Special Features
 
