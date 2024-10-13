@@ -22,7 +22,7 @@ opt-level = 3
 maintainer = "barely-a-dev <nahman1234lol12@gmail.com>"
 copyright = "2024, Nash Project Contributors"
 license-file = ["LICENSE", "4"]
-extended-description = "Nash - A Rust-based alternative to Bash"
+description = "Nash - A Rust-based alternative to Bash"
 depends = "$auto"
 section = "utility"
 priority = "optional"
@@ -34,7 +34,7 @@ assets = [
 [package.metadata.arch]
 arch = ["x86_64"]
 depends = []
-
+description = "Nash - A Rust-based alternative to Bash"
 [package.metadata.rpm]
 package = "nash"
 
