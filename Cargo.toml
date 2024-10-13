@@ -17,3 +17,34 @@ lto = true
 codegen-units = 1
 strip = true
 opt-level = "3"
+
+[package]
+name = "nash"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata.deb]
+maintainer = "barely-a-dev <nahman1234lol12@gmail.com>"
+copyright = "2024, Nash Project Contributors"
+license-file = ["LICENSE", "4"]
+extended-description = "Nash - A Rust-based alternative to Bash"
+depends = "$auto"
+section = "utility"
+priority = "optional"
+assets = [
+    ["target/release/nash", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/nash/README", "644"],
+]
+
+[package.metadata.arch]
+arch = ["x86_64"]
+depends = []
+
+[package.metadata.rpm]
+package = "nash"
+
+[package.metadata.rpm.cargo]
+buildflags = ["--release"]
+
+[package.metadata.rpm.targets]
+nash = { path = "/usr/bin/nash" }

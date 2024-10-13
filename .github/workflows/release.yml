@@ -21,6 +21,33 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v2
 
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Install cargo-deb
+      run: cargo install cargo-deb
+
+    - name: Install cargo-arch
+      run: cargo install cargo-arch
+
+    - name: Install cargo-rpm
+      run: cargo install cargo-rpm
+
+    - name: Build Rust project
+      run: cargo build --release
+
+    - name: Create Debian package
+      run: cargo deb
+
+    - name: Create Arch Linux package
+      run: cargo arch
+
+    - name: Create RPM package
+      run: cargo rpm build
+
     - name: Run install script
       run: |
         chmod +x ./install.sh
@@ -52,7 +79,7 @@ jobs:
         draft: false
         prerelease: false
 
-    - name: Upload Release Asset
+    - name: Upload Release Assets
       if: steps.check_release.outputs.exists == 'false'
       uses: actions/upload-release-asset@v1
       env:
@@ -62,6 +89,39 @@ jobs:
         asset_path: ./target/release/nash
         asset_name: nash
         asset_content_type: application/octet-stream
+
+    - name: Upload Debian Package
+      if: steps.check_release.outputs.exists == 'false'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./target/debian/nash_${{ github.event.inputs.tag }}_amd64.deb
+        asset_name: nash_${{ github.event.inputs.tag }}_amd64.deb
+        asset_content_type: application/vnd.debian.binary-package
+
+    - name: Upload Arch Linux Package
+      if: steps.check_release.outputs.exists == 'false'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./target/arch/nash-${{ github.event.inputs.tag }}-1-x86_64.pkg.tar.zst
+        asset_name: nash-${{ github.event.inputs.tag }}-1-x86_64.pkg.tar.zst
+        asset_content_type: application/zstd
+
+    - name: Upload RPM Package
+      if: steps.check_release.outputs.exists == 'false'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./target/release/rpmbuild/RPMS/x86_64/nash-${{ github.event.inputs.tag }}-1.x86_64.rpm
+        asset_name: nash-${{ github.event.inputs.tag }}-1.x86_64.rpm
+        asset_content_type: application/x-rpm
 
     - name: Release already exists
       if: steps.check_release.outputs.exists == 'true'
