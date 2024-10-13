@@ -35,9 +35,3 @@ assets = [
     ["target/release/nash", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/nash/README", "644"],
 ]
-
-[package.metadata.rpm.cargo]
-buildflags = ["--release"]
-
-[package.metadata.rpm.targets]
-nash = { path = "/usr/bin/nash" }
