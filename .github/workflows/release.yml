@@ -6,9 +6,6 @@ on:
       tag:
         description: 'Tag for the release (e.g., v1.0.0.0)'
         required: true
-      tag2:
-        description: 'Tag for the debian release (e.g., v1.0.0)'
-        required: true
       version_name:
         description: 'Version name for the release'
         required: true
@@ -37,7 +34,7 @@ jobs:
       run: cargo build --release
 
     - name: Create Debian package
-      run: cargo deb
+      run: cargo deb -o ./nash.deb
 
     - name: Run install script
       run: |
@@ -88,7 +85,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./target/debian/nash_${{ github.event.inputs.tag2 }}_amd64.deb
+        asset_path: ./nash.deb
         asset_name: nash_${{ github.event.inputs.tag }}_amd64.deb
         asset_content_type: application/vnd.debian.binary-package
 
