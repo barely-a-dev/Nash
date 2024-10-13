@@ -4,7 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag for the release (e.g., v1.0.0)'
+        description: 'Tag for the release (e.g., v1.0.0.0)'
+        required: true
+      tag2:
+        description: 'Tag for the debian release (e.g., v1.0.0)'
         required: true
       version_name:
         description: 'Version name for the release'
@@ -85,7 +88,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./target/debian/nash_${{ github.event.inputs.tag }}_amd64.deb
+        asset_path: ./target/debian/nash_${{ github.event.inputs.tag2 }}_amd64.deb
         asset_name: nash_${{ github.event.inputs.tag }}_amd64.deb
         asset_content_type: application/vnd.debian.binary-package
 
