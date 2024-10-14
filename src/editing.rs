@@ -27,7 +27,8 @@ impl AutoCompleter {
             "exit".to_string(),
             "summon".to_string(),
             "alias".to_string(),
-            "rmalias".to_string()
+            "rmalias".to_string(),
+            "help".to_string(),
             // More built-in commands here
         ];
 
@@ -170,14 +171,17 @@ impl Hinter for CommandHinter {
         let command = trimmed_last_part.split_whitespace().next()?;
         match command {
             "cd" => Some(" <directory>".to_string()),
-            "ls" => Some(" [directory]".to_string()),
-            "cp" => Some(" <source> <destination>".to_string()),
-            "mv" => Some(" <source> <destination>".to_string()),
-            "rm" => Some(" <file>".to_string()),
-            "mkdir" => Some(" <directory>".to_string()),
+            "ls" => Some(" [directory] [-l] [-a] [-d]".to_string()),
+            "cp" => Some(" [-r|R] [-f] <source> <destination>".to_string()),
+            "mv" => Some(" [-f] <source> <destination>".to_string()),
+            "rm" => Some(" [-f] <file>".to_string()),
+            "mkdir" => Some(" [-p] <directory>".to_string()),
+            "history" => Some("".to_string()),
+            "exit" => Some("".to_string()),
             "summon" => Some(" <command>".to_string()),
             "alias" => Some(" <identifier>[=<command>]".to_string()),
             "rmalias" => Some(" <identifier>".to_string()),
+            "help" => Some("".to_string()),
             _ => None,
         }
     }

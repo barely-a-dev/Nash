@@ -1,6 +1,6 @@
 # Nash - A Modern Shell Written in Rust
 
-Nash is a simple shell written in Rust, designed to provide a modern command-line experience with enhanced features and performance.
+Nash is a simple shell written in Rust, attempting to provide a modern command-line experience with enhanced features and performance.
 
 ## Table of Contents
 
@@ -52,7 +52,19 @@ Nash is a simple shell written in Rust, designed to provide a modern command-lin
 
 ## Usage
 
-After installation, you can start Nash by typing `nash` in your terminal.
+After installation, you can start Nash by typing `nash` in your terminal. The more daring may make nash their default shell by running the following commands:
+(Important note: Reminder that Nash is not yet feature rich or compatible with .sh files which expect Bash. Doing this WILL break many applications, or possibly your system. DO THE BELOW AT YOUR OWN RISK.)
+1. Add nash to shells:
+   ```
+   sudo nano /etc/shells
+   ```
+   and add /usr/bin/nash to the list on a new line.
+2. Change shells
+   ```
+   chsh -s /usr/bin/nash
+   ```
+   Enter your password and press enter.
+3. Log out and log back in or restart. Nash will be your default shell!
 
 ### Command-line Options
 
@@ -63,18 +75,26 @@ After installation, you can start Nash by typing `nash` in your terminal.
 
 ### Built-in Commands
 
-- `cd [directory]`: Change the current directory
-- `ls [directory]`: List contents of a directory
-- `cp <source> <destination>`: Copy files or directories
-- `mv <source> <destination>`: Move files or directories
-- `rm <file>`: Remove a file
-- `mkdir <directory>`: Create a new directory
-- `history`: Display command history
-- `exit`: Exit the shell
-- `summon <command>`: Open an *external* command in a new terminal window (internal commands not yet supported. Planned for v0.1.1 after the major bug fixing of 0.1.0)
-- `alias <identifier>[=original]`: Create an alias for a command
-- `rmalias <identifier>`: Remove an alias for a command
-- `help`: Display a help menu similar to this
+- cd <directory>: Change the current directory
+- ls [directory] [-l] [-a] [-d]: List contents of a directory
+  - -l: Use long listing format
+  - -a: Show hidden files
+  - -d: List directories themselves, not their contents
+- cp [-r|R] [-f] <source> <destination>: Copy files or directories
+  - -r, -R: Copy directories recursively
+  - -f: Force copy, overwrite destination if it exists
+- mv [-f] <source> <destination>: Move files or directories
+  - -f: Force move, overwrite destination if it exists
+- rm [-f] <file>: Remove a file
+  - -f: Force removal without prompt
+- mkdir [-p] <directory>: Create a new directory
+  - -p: Create parent directories as needed
+- history: Display command history
+- exit: Exit the shell
+- summon <command>: Open an *external* command in a new terminal window
+- alias <identifier>[=original]: Create an alias for a command
+- rmalias <identifier>: Remove an alias for a command
+- help: Display a help menu
 
 ### Special Features
 
@@ -85,7 +105,7 @@ After installation, you can start Nash by typing `nash` in your terminal.
 
 ## Development Status
 
-Nash is currently in early development (v0.0.9.5.1). While it's functional for basic use, many features are still being implemented or improved.
+Nash is currently in early development (v0.0.9.5.4). While it's functional for basic use, many features are still being implemented or improved.
 
 ## Contributing
 
@@ -113,7 +133,7 @@ The following features and improvements are planned for future releases:
 - [ ] Scripting capabilities (if, elif, else, for, while, functions, variables)
 - [ ] Wildcards and regex support
 - [-] Enhanced command-line options
-- [ ] Improved argument handling for built-in commands
+- [-] Improved argument handling for built-in commands
 - [✔] Support for popular, complex commands and text editors (e.g., Nano, Vim)
 - [-] Self-updating capability
 

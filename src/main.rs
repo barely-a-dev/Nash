@@ -1,9 +1,10 @@
 // Important TODOs: Fix updating, which evidently never worked.
-// MAJOR TODOs: export for env vars, CONFIG, set/unset for setting config (easy?), quotes and escaping ('', "", \), alias command (easy)
-// Absolutely HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables), wildcards/regex (*, ?, []), ACTUAL ARGUMENTS FOR COMMANDS (like ls -a and rm -f instead of just ls and rm (I am not doing rm -r. It's stupid.))
+// MAJOR TODOs: export for env vars, CONFIG, set/unset for setting temp config (easy?), quotes and escaping ('', "", \)
+// Absolutely HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables), wildcards/regex (*, ?, []).
 pub mod editing;
 
 use crate::editing::*;
+use chrono::{DateTime, Local};
 use dirs;
 use git2::Repository;
 use rustyline::{
@@ -20,10 +21,12 @@ use std::{
     collections::HashMap,
     env,
     ffi::OsStr,
-    fs::{self, create_dir, remove_file, OpenOptions},
+    fs::{self, OpenOptions},
     io::{self, Error, Write},
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{self, Command, Stdio},
+    time::SystemTime
 };
 use tokio::runtime::Runtime;
 use whoami::fallible;
@@ -54,6 +57,50 @@ fn main() {
             handle_nash_args(args).await;
         }
     });
+}
+
+fn parse_args(args: &[String]) -> HashMap<String, Option<String>> {
+    let mut parsed_args: HashMap<String, Option<String>> = HashMap::new();
+    let mut i: usize = 1; // Start from 1 to skip the program name
+
+    while i < args.len() {
+        let arg: &String = &args[i];
+        
+        if arg.starts_with("--") {
+            // Long option
+            let option: String = arg[2..].to_string();
+            if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                // Option with value
+                parsed_args.insert(option, Some(args[i + 1].clone()));
+                i += 2;
+            } else {
+                // Flag option
+                parsed_args.insert(option, None);
+                i += 1;
+            }
+        } else if arg.starts_with('-') {
+            // Short option
+            let options: Vec<char> = arg[1..].chars().collect();
+            for (j, opt) in options.iter().enumerate() {
+                let option: String = opt.to_string();
+                if j == options.len() - 1 && i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                    // Last option in group with value
+                    parsed_args.insert(option, Some(args[i + 1].clone()));
+                    i += 1;
+                } else {
+                    // Flag option
+                    parsed_args.insert(option, None);
+                }
+            }
+            i += 1;
+        } else {
+            // Non-option argument
+            parsed_args.insert(arg.clone(), None);
+            i += 1;
+        }
+    }
+
+    parsed_args
 }
 
 #[derive(Helper)]
@@ -180,13 +227,13 @@ fn get_alias_file_path() -> PathBuf {
 }
 
 fn eval(state: &mut ShellState, cmd: String) -> String {
-    let chars_to_check = [';', '|', '>'];
+    let chars_to_check: [char; 3] = [';', '|', '>'];
 
     if cmd.contains(|c| chars_to_check.contains(&c)) {
         return special_eval(state, cmd);
     }
 
-    let expanded_cmd = expand_env_vars(&cmd);
+    let expanded_cmd: String = expand_env_vars(&cmd);
     let cmd_parts: Vec<String> = expanded_cmd
         .trim()
         .split_whitespace()
@@ -203,11 +250,11 @@ fn eval(state: &mut ShellState, cmd: String) -> String {
     }
 
     // Load aliases
-    let alias_file_path = get_alias_file_path();
-    let aliases = load_aliases(&alias_file_path);
+    let alias_file_path: PathBuf = get_alias_file_path();
+    let aliases: HashMap<String, String> = load_aliases(&alias_file_path);
 
     // Check for alias and expand if found
-    let expanded_cmd_parts = if let Some(alias_cmd) = aliases.get(&cmd_parts[0]) {
+    let expanded_cmd_parts: Vec<String> = if let Some(alias_cmd) = aliases.get(&cmd_parts[0]) {
         let mut new_cmd_parts: Vec<String> = alias_cmd.split_whitespace().map(String::from).collect();
         new_cmd_parts.extend_from_slice(&cmd_parts[1..]);
         new_cmd_parts
@@ -229,13 +276,15 @@ fn eval(state: &mut ShellState, cmd: String) -> String {
             println!("Exiting...");
             process::exit(0);
         }
+        // TODO: Allow creation of aliases to files, IE alias kill='./pkill' and summonning of current directory files IE summon ./pkill
         "summon" => handle_summon(&expanded_cmd_parts),
         "alias" => handle_alias(&expanded_cmd_parts),
         "rmalias" => handle_remove_alias(&expanded_cmd_parts),
         "help" => show_help(),
+        "finfo" => file_info(state, &expanded_cmd_parts),
         _ => {
             // If not a built-in command, execute as an external command
-            let result = execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts);
+            let result: String = execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts);
             if !result.is_empty() {
                 println!("{}", result);
             }
@@ -244,13 +293,28 @@ fn eval(state: &mut ShellState, cmd: String) -> String {
     }
 }
 
-fn show_help() -> String
+fn file_info(state: &ShellState, cmd: &Vec<String>) -> String
 {
-    "cd <directory>: Change the current directory\nls [directory]: List contents of a directory\ncp <source> <destination>: Copy files or directories\nmv <source> <destination>: Move files or directories\nrm <file>: Remove a file\nmkdir <directory>: Create a new directory\nhistory: Display command history\nexit: Exit the shell\nsummon <command>: Open an *external* command in a new terminal window (internal commands not yet supported. Planned for v0.1.1 after the major bug fixing of 0.1.0)\nalias <identifier>[=original]: Create an alias for a command\nrmalias <identifier>: Remove an alias for a command\nhelp: Display this".to_owned()
+    todo!()
+}
+
+fn show_help() -> String {
+    "cd <directory>: Change the current directory\n\
+     ls [directory] [-l] [-a] [-d]: List contents of a directory\n\
+     cp [-r|R] [-f] <source> <destination>: Copy files or directories\n\
+     mv [-f] <source> <destination>: Move files or directories\n\
+     rm [-f] <file>: Remove a file\n\
+     mkdir [-p] <directory>: Create a new directory\n\
+     history: Display command history\n\
+     exit: Exit the shell\n\
+     summon <command>: Open an *external* command in a new terminal window\n\
+     alias <identifier>[=original]: Create an alias for a command\n\
+     rmalias <identifier>: Remove an alias for a command\n\
+     help: Display this help menu".to_owned()
 }
 
 fn special_eval(state: &mut ShellState, cmd: String) -> String {
-    let mut result = String::new();
+    let mut result: String = String::new();
     let commands: Vec<String> = cmd.split(';').map(|s| s.trim().to_owned()).collect();
 
     for command in commands {
@@ -268,14 +332,14 @@ fn special_eval(state: &mut ShellState, cmd: String) -> String {
 fn pipe_eval(cmd: String) -> String {
     let parts: Vec<String> = cmd.split('|').map(|s| s.trim().to_owned()).collect();
 
-    let mut input = String::new();
+    let mut input: String = String::new();
     for part in parts {
         let command_parts: Vec<String> = part.split_whitespace().map(String::from).collect();
-        let command = &command_parts[0];
-        let args = &command_parts[1..];
+        let command: &String = &command_parts[0];
+        let args: &[String] = &command_parts[1..];
 
         // Create a command with the input as stdin
-        let mut child = Command::new(command)
+        let mut child: process::Child = Command::new(command)
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -284,12 +348,12 @@ fn pipe_eval(cmd: String) -> String {
 
         // Write the previous command's output to this command's input
         if !input.is_empty() {
-            let stdin = child.stdin.as_mut().expect("Failed to open stdin");
+            let stdin: &mut process::ChildStdin = child.stdin.as_mut().expect("Failed to open stdin");
             stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
         }
 
         // Get the output of this command
-        let output = child.wait_with_output().expect("Failed to read stdout");
+        let output: process::Output = child.wait_with_output().expect("Failed to read stdout");
 
         if output.status.success() {
             input = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -316,11 +380,11 @@ fn out_redir_eval(state: &mut ShellState, cmd: String) -> String {
         return "Invalid output redirection syntax".to_owned();
     }
 
-    let command = parts[0].clone();
-    let file_path = parts[1].clone();
-    let append_mode = cmd.contains(">>");
+    let command: String = parts[0].clone();
+    let file_path: String = parts[1].clone();
+    let append_mode: bool = cmd.contains(">>");
 
-    let mut file_options = OpenOptions::new();
+    let mut file_options: OpenOptions = OpenOptions::new();
     file_options.write(true).create(true);
     if append_mode {
         file_options.append(true);
@@ -330,7 +394,7 @@ fn out_redir_eval(state: &mut ShellState, cmd: String) -> String {
 
     match file_options.open(&file_path) {
         Ok(mut file) => {
-            let output = eval(state, command);
+            let output: String = eval(state, command);
             match file.write_all(output.as_bytes()) {
                 Ok(_) => NO_RESULT.to_owned(),
                 Err(e) => format!("Failed to write to file: {}", e),
@@ -430,7 +494,7 @@ fn handle_summon(cmd_parts: &[String]) -> String {
 
         let result: Result<process::Child, Error> = match terminal {
             "gnome-terminal" => {
-                let mut cmd = vec!["bash", "-c", executable];
+                let mut cmd: Vec<&str> = vec!["bash", "-c", executable];
                 cmd.extend(args.iter().map(|s| s.as_str()));
                 println!("Executing: {} -- {} {:?}", terminal, cmd.join(" "), cmd);
                 Command::new(terminal)
@@ -442,7 +506,7 @@ fn handle_summon(cmd_parts: &[String]) -> String {
                     .spawn()
             },
             "warp" => {
-                let mut cmd = vec![executable.as_str()];
+                let mut cmd: Vec<&str> = vec![executable.as_str()];
                 cmd.extend(args.iter().map(|s| s.as_str()));
                 println!("Executing: {} --cmd {} {:?}", terminal, cmd.join(" "), cmd);
                 Command::new(terminal)
@@ -454,7 +518,7 @@ fn handle_summon(cmd_parts: &[String]) -> String {
                     .spawn()
             },
             "termux" => {
-                let mut cmd = vec![executable.as_str()];
+                let mut cmd: Vec<&str> = vec![executable.as_str()];
                 cmd.extend(args.iter().map(|s| s.as_str()));
                 println!("Executing: {} -e {} {:?}", terminal, cmd.join(" "), cmd);
                 Command::new(terminal)
@@ -466,7 +530,7 @@ fn handle_summon(cmd_parts: &[String]) -> String {
                     .spawn()
             },
             _ => {
-                let mut cmd = vec![executable.as_str()];
+                let mut cmd: Vec<&str> = vec![executable.as_str()];
                 cmd.extend(args.iter().map(|s| s.as_str()));
                 println!("Executing: {} -e {} {:?}", terminal, cmd.join(" "), cmd);
                 Command::new(terminal)
@@ -541,8 +605,8 @@ fn handle_history() -> String {
 }
 
 fn handle_alias(cmd_parts: &[String]) -> String {
-    let alias_file_path = get_alias_file_path();
-    let mut aliases = load_aliases(&alias_file_path);
+    let alias_file_path: PathBuf = get_alias_file_path();
+    let mut aliases: HashMap<String, String> = load_aliases(&alias_file_path);
 
     if cmd_parts.len() == 1 {
         // List all aliases
@@ -554,11 +618,11 @@ fn handle_alias(cmd_parts: &[String]) -> String {
             .collect::<Vec<String>>()
             .join("\n");
     } else {
-        let alias_str = cmd_parts[1..].join(" ");
+        let alias_str: String = cmd_parts[1..].join(" ");
         if let Some(pos) = alias_str.find('=') {
             let (name, command) = alias_str.split_at(pos);
-            let name = name.trim();
-            let command = command[1..].trim().trim_matches('\'').trim_matches('"');
+            let name: &str = name.trim();
+            let command: &str = command[1..].trim().trim_matches('\'').trim_matches('"');
             aliases.insert(name.to_string(), command.to_string());
             save_aliases(&alias_file_path, &aliases);
             return format!("Alias '{}' created.", name);
@@ -578,9 +642,9 @@ fn handle_remove_alias(cmd_parts: &[String]) -> String {
         return "Usage: rmalias <alias_name>".to_owned();
     }
 
-    let alias_name = &cmd_parts[1];
-    let alias_file_path = get_alias_file_path();
-    let mut aliases = load_aliases(&alias_file_path);
+    let alias_name: &String = &cmd_parts[1];
+    let alias_file_path: PathBuf = get_alias_file_path();
+    let mut aliases: HashMap<String, String> = load_aliases(&alias_file_path);
 
     if aliases.remove(alias_name).is_some() {
         save_aliases(&alias_file_path, &aliases);
@@ -591,7 +655,7 @@ fn handle_remove_alias(cmd_parts: &[String]) -> String {
 }
 
 fn load_aliases(path: &PathBuf) -> HashMap<String, String> {
-    let mut aliases = HashMap::new();
+    let mut aliases: HashMap<String, String> = HashMap::new();
     if let Ok(contents) = fs::read_to_string(path) {
         for line in contents.lines() {
             if let Some(pos) = line.find('=') {
@@ -613,73 +677,282 @@ fn save_aliases(path: &PathBuf, aliases: &HashMap<String, String>) {
 }
 
 fn handle_cp(cmd_parts: &[String]) -> String {
-    match cmd_parts.len() {
-        3 => match copy_item(&cmd_parts[1], &cmd_parts[2]) {
-            Ok(_) => "Successfully copied item.".to_owned(),
-            Err(e) => format!("An error occurred: {}", e),
-        },
-        0..=2 => "Incorrect number of arguments. Usage: cp <source_path> <dest_path> [arguments]"
-            .to_owned(),
-        _ => "Copy with arguments not implemented yet.".to_owned(),
+    let args: HashMap<String, Option<String>> = parse_args(cmd_parts);
+    let recursive: bool = args.contains_key("r") || args.contains_key("R");
+    let force: bool = args.contains_key("f");
+
+    if cmd_parts.len() < 3 {
+        return "Usage: cp [-r|R] [-f] <source> <destination>".to_owned();
     }
+
+    let src: &String = &cmd_parts[cmd_parts.len() - 2];
+    let dst: &String = &cmd_parts[cmd_parts.len() - 1];
+
+    match copy_item(src, dst, recursive, force) {
+        Ok(_) => "Successfully copied item.".to_owned(),
+        Err(e) => format!("An error occurred: {}", e),
+    }
+}
+
+fn copy_item(src: &str, dst: &str, recursive: bool, force: bool) -> io::Result<()> {
+    let src_path: &Path = Path::new(src);
+    let dst_path: &Path = Path::new(dst);
+
+    if src_path.is_dir() && !recursive {
+        return Err(io::Error::new(io::ErrorKind::Other, "Cannot copy directory without -r flag"));
+    }
+
+    if src_path.is_dir() {
+        copy_dir_all(src_path, dst_path, force)?;
+    } else {
+        if dst_path.is_dir() {
+            let file_name: &OsStr = src_path.file_name().unwrap();
+            let dst_file_path: PathBuf = dst_path.join(file_name);
+            if force || !dst_file_path.exists() {
+                fs::copy(src_path, dst_file_path)?;
+            } else {
+                return Err(io::Error::new(io::ErrorKind::AlreadyExists, "Destination file already exists"));
+            }
+        } else {
+            if force || !dst_path.exists() {
+                fs::copy(src_path, dst_path)?;
+            } else {
+                return Err(io::Error::new(io::ErrorKind::AlreadyExists, "Destination file already exists"));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn handle_mv(cmd_parts: &[String]) -> String {
-    match cmd_parts.len() {
-        3 => match move_item(&cmd_parts[1], &cmd_parts[2]) {
-            Ok(_) => "Successfully moved item.".to_owned(),
-            Err(e) => format!("An error occurred: {}", e),
-        },
-        0..=2 => "Incorrect number of arguments. Usage: mv <source_path> <dest_path>".to_owned(),
-        _ => "Args not implemented yet.".to_owned(),
+    let args: HashMap<String, Option<String>> = parse_args(cmd_parts);
+    let force: bool = args.contains_key("f");
+
+    if cmd_parts.len() < 3 {
+        return "Usage: mv [-f] <source> <destination>".to_owned();
+    }
+
+    let src: &String = &cmd_parts[cmd_parts.len() - 2];
+    let dst: &String = &cmd_parts[cmd_parts.len() - 1];
+
+    match move_item(src, dst, force) {
+        Ok(_) => "Successfully moved item.".to_owned(),
+        Err(e) => format!("An error occurred: {}", e),
     }
 }
 
+fn move_item(src: &str, dst: &str, force: bool) -> io::Result<()> {
+    let src_path: &Path = Path::new(src);
+    let dst_path: &Path = Path::new(dst);
+
+    if src_path.is_dir() {
+        if dst_path.exists() && dst_path.is_dir() {
+            let new_dst: PathBuf = dst_path.join(src_path.file_name().unwrap());
+            if force || !new_dst.exists() {
+                fs::rename(src_path, new_dst)?;
+            } else {
+                return Err(io::Error::new(io::ErrorKind::AlreadyExists, "Destination directory already exists"));
+            }
+        } else {
+            if force || !dst_path.exists() {
+                fs::rename(src_path, dst_path)?;
+            } else {
+                return Err(io::Error::new(io::ErrorKind::AlreadyExists, "Destination already exists"));
+            }
+        }
+    } else {
+        if dst_path.is_dir() {
+            let file_name: &OsStr = src_path.file_name().unwrap();
+            let dst_file_path: PathBuf = dst_path.join(file_name);
+            if force || !dst_file_path.exists() {
+                fs::rename(src_path, dst_file_path)?;
+            } else {
+                return Err(io::Error::new(io::ErrorKind::AlreadyExists, "Destination file already exists"));
+            }
+        } else {
+            if force || !dst_path.exists() {
+                fs::rename(src_path, dst_path)?;
+            } else {
+                return Err(io::Error::new(io::ErrorKind::AlreadyExists, "Destination file already exists"));
+            }
+        }
+    }
+    Ok(())
+}
+
+
 fn handle_rm(cmd_parts: &[String]) -> String {
-    match cmd_parts.len() {
-        2 => match remove_file(&cmd_parts[1]) {
-            Ok(_) => "Successfully removed file.".to_owned(),
-            Err(e) => format!("An error occurred: {}", e),
-        },
-        _ => "Incorrect number of arguments. Usage: rm <file_path>".to_owned(),
+    let args: HashMap<String, Option<String>> = parse_args(cmd_parts);
+    let force: bool = args.contains_key("f");
+
+    if cmd_parts.len() < 2 {
+        return "Usage: rm [-f] <file>".to_owned();
+    }
+
+    let file_path: &String = &cmd_parts[1];
+    let path: &Path = Path::new(file_path);
+
+    if force {
+        match fs::remove_file(path) {
+            Ok(_) => "File removed successfully.".to_owned(),
+            Err(e) => format!("Error removing file: {}", e),
+        }
+    } else {
+        if path.exists() {
+            println!("Are you sure you want to remove {}? (y/N)", file_path);
+            let mut input: String = String::new();
+            io::stdin().read_line(&mut input).unwrap();
+            if input.trim().to_lowercase() == "y" {
+                match fs::remove_file(path) {
+                    Ok(_) => "File removed successfully.".to_owned(),
+                    Err(e) => format!("Error removing file: {}", e),
+                }
+            } else {
+                "Operation cancelled.".to_owned()
+            }
+        } else {
+            format!("File not found: {}", file_path)
+        }
     }
 }
 
 fn handle_mkdir(cmd_parts: &[String]) -> String {
-    match cmd_parts.len() {
-        2 => match create_dir(&cmd_parts[1]) {
+    let args: HashMap<String, Option<String>> = parse_args(cmd_parts);
+    let parents: bool = args.contains_key("p");
+
+    if cmd_parts.len() < 2 {
+        return "Usage: mkdir [-p] <directory_path>".to_owned();
+    }
+
+    let dir_path: &String = &cmd_parts[cmd_parts.len() - 1];
+
+    if parents {
+        match fs::create_dir_all(dir_path) {
+            Ok(_) => "Successfully created directory and any necessary parent directories.".to_owned(),
+            Err(e) => format!("An error occurred: {}", e),
+        }
+    } else {
+        match fs::create_dir(dir_path) {
             Ok(_) => "Successfully created directory.".to_owned(),
             Err(e) => format!("An error occurred: {}", e),
-        },
-        _ => "Incorrect number of arguments. Usage: mkdir <directory_path>".to_owned(),
+        }
     }
 }
 
 fn handle_ls(state: &ShellState, cmd_parts: &[String]) -> String {
-    match cmd_parts.len() {
-        1 => list_directory(&state.cwd),
-        2 => {
-            let path: PathBuf = if cmd_parts[1].starts_with('/') {
-                PathBuf::from(&cmd_parts[1])
-            } else {
-                PathBuf::from(&state.cwd).join(&cmd_parts[1])
-            };
-            list_directory(path.to_str().unwrap_or(""))
+    let args: HashMap<String, Option<String>> = parse_args(cmd_parts);
+    let long_format: bool = args.contains_key("l");
+    let show_hidden: bool = args.contains_key("a");
+    let list_dir_itself: bool = args.contains_key("d");
+
+    let path: PathBuf = if cmd_parts.len() > 1 && !cmd_parts[1].starts_with('-') {
+        if cmd_parts[1].starts_with('/') {
+            PathBuf::from(&cmd_parts[1])
+        } else {
+            PathBuf::from(&state.cwd).join(&cmd_parts[1])
         }
-        _ => "Incorrect number of arguments. Usage: ls [directory_path]".to_owned(),
+    } else {
+        PathBuf::from(&state.cwd)
+    };
+
+    if list_dir_itself {
+        return list_directory_entry(&path, long_format);
     }
+
+    list_directory(&path, long_format, show_hidden)
+}
+
+fn list_directory(path: &Path, long_format: bool, show_hidden: bool) -> String {
+    let mut out: String = String::new();
+
+    match fs::read_dir(path) {
+        Ok(entries) => {
+            let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
+            entries.sort_by_key(|e| e.file_name());
+
+            for entry in entries {
+                let file_name: std::ffi::OsString = entry.file_name();
+                let file_name_str: Cow<'_, str> = file_name.to_string_lossy();
+
+                if !show_hidden && file_name_str.starts_with('.') {
+                    continue;
+                }
+
+                if long_format {
+                    let entry_path: PathBuf = entry.path();
+                    if let Ok(metadata) = entry.metadata() {
+                        out.push_str(&format_long_listing(&entry_path, &metadata));
+                    } else {
+                        // Handle the error case, e.g., by skipping this entry
+                        eprintln!("Failed to get metadata for {:?}", entry_path);
+                    }
+                } else {
+                    out.push_str(&format!("{}\n", file_name_str));
+                }
+            }
+
+            if out.is_empty() {
+                "Directory is empty".to_owned()
+            } else {
+                out
+            }
+        }
+        Err(e) => {
+            format!("Failed to read directory: {} ({})", path.display(), e)
+        }
+    }
+}
+
+fn list_directory_entry(path: &Path, long_format: bool) -> String {
+    if long_format {
+        let metadata: fs::Metadata = fs::metadata(path).unwrap();
+        format_long_listing(path, &metadata)
+    } else {
+        format!("{}\n", path.display())
+    }
+}
+
+fn format_long_listing(path: &Path, metadata: &fs::Metadata) -> String {
+    let file_type: &str = if metadata.is_dir() { "d" } else { "-" };
+    let permissions: fs::Permissions = metadata.permissions();
+    let mode: u32 = permissions.mode();
+    let size: u64 = metadata.len();
+    let modified: SystemTime = metadata.modified().unwrap();
+    let modified_str: String = format_time(modified);
+
+    format!(
+        "{}{} {:>8} {:>8} {}\n",
+        file_type,
+        format_permissions(mode),
+        size,
+        modified_str,
+        path.file_name().unwrap_or_default().to_string_lossy()
+    )
+}
+
+fn format_time(time: SystemTime) -> String {
+    let datetime: DateTime<Local> = time.into();
+    datetime.format("%b %d %H:%M").to_string()
+}
+fn format_permissions(mode: u32) -> String {
+    let user: String = format_permission_triple(mode >> 6);
+    let group: String = format_permission_triple(mode >> 3);
+    let other: String = format_permission_triple(mode);
+    format!("{}{}{}", user, group, other)
+}
+
+fn format_permission_triple(mode: u32) -> String {
+    let read: &str = if mode & 0b100 != 0 { "r" } else { "-" };
+    let write: &str = if mode & 0b010 != 0 { "w" } else { "-" };
+    let execute: &str = if mode & 0b001 != 0 { "x" } else { "-" };
+    format!("{}{}{}", read, write, execute)
 }
 
 fn handle_cd(state: &mut ShellState, cmd_parts: &[String]) -> String {
     match cmd_parts.len() {
         1 => {
             // Change to home directory when no argument is provided
-            if let Some(home_dir) = dirs::home_dir() {
-                state.cwd = home_dir.to_string_lossy().into_owned();
-                NO_RESULT.to_owned()
-            } else {
-                "Unable to determine home directory".to_owned()
-            }
+            "No directory passed. Usage: cd <directory>".to_owned()
         }
         2 => {
             let new_path: PathBuf = if cmd_parts[1] == ".." {
@@ -710,6 +983,8 @@ fn handle_cd(state: &mut ShellState, cmd_parts: &[String]) -> String {
     }
 }
 
+
+// TODO: use parse_args() in handling nash's arguments.
 async fn handle_nash_args(args: Vec<String>) {
     // Check if arg 1 is a path, if so, run it as a series of commands (like bash's .sh running impl) (scripting)
     // PLACEHOLDER, WILL NOT WORK LIKE INTENDED!!
@@ -740,7 +1015,7 @@ async fn handle_nash_args(args: Vec<String>) {
 
     // Handle other command-line arguments
     if args.contains(&"--version".to_string()) {
-        println!("v0.0.9.5.1");
+        println!("v0.0.9.5.4");
         return;
     }
 
@@ -799,7 +1074,7 @@ fn get_local_version() -> String {
 }
 async fn get_remote_version() -> String {
     let url: &str = "https://raw.githubusercontent.com/barely-a-dev/Nash/refs/heads/main/ver";
-    let response = reqwest::get(url)
+    let response: reqwest::Response = reqwest::get(url)
         .await
         .expect("Failed to fetch remote version");
     response
@@ -878,7 +1153,7 @@ async fn update_nash() {
 fn execute_external_command(cmd: &str, cmd_parts: &[String]) -> String {
     match find_command_in_path(cmd) {
         Some(path) => {
-            let mut command = Command::new(path);
+            let mut command: Command = Command::new(path);
             if cmd_parts.len() > 1 {
                 command.args(&cmd_parts[1..]);
             }
@@ -934,7 +1209,7 @@ fn execute_file(state: &ShellState, path: &str, args: &[String]) -> String {
 fn find_command_in_path(cmd: &str) -> Option<String> {
     if let Ok(path) = env::var("PATH") {
         for dir in path.split(":") {
-            let full_path = format!("{}/{}", dir, cmd);
+            let full_path: String = format!("{}/{}", dir, cmd);
             if std::fs::metadata(&full_path).is_ok() {
                 return Some(full_path);
             }
@@ -943,69 +1218,13 @@ fn find_command_in_path(cmd: &str) -> Option<String> {
     None
 }
 
-fn list_directory(path: &str) -> String {
-    let mut out: String = String::new();
-    let dir_path: &Path = Path::new(path);
-    if dir_path.is_file() {
-        let file_name: &OsStr = dir_path
-            .file_name()
-            .expect("Could not get file name of file passed to ls.");
-        let fn_str: &str = file_name
-            .to_str()
-            .expect("Could not convert OsStr to &str.");
-        out.push_str(&fn_str);
-        return out;
-    }
-
-    match fs::read_dir(dir_path) {
-        Ok(entries) => {
-            for entry in entries {
-                if let Ok(entry) = entry {
-                    let file_name: std::ffi::OsString = entry.file_name();
-                    let file_name_str: std::borrow::Cow<'_, str> = file_name.to_string_lossy();
-                    if file_name_str != "." && file_name_str != ".." {
-                        // Only display the file/directory name, not the full path
-                        out.push_str(&format!("{}\n", file_name_str));
-                    }
-                }
-            }
-            if out.is_empty() {
-                "Directory is empty".to_owned()
-            } else {
-                out
-            }
-        }
-        Err(e) => {
-            format!("Failed to read directory: {} ({})", path, e)
-        }
-    }
-}
-
 fn print(result: String) {
     if !result.is_empty() {
         println!("{}", result);
     }
 }
 
-fn copy_item(src: &str, dst: &str) -> io::Result<()> {
-    let src_path: &Path = Path::new(src);
-    let dst_path: &Path = Path::new(dst);
-
-    if src_path.is_dir() {
-        copy_dir_all(src_path, dst_path)?;
-    } else {
-        if dst_path.is_dir() {
-            let file_name: &OsStr = src_path.file_name().unwrap();
-            let dst_file_path: PathBuf = dst_path.join(file_name);
-            fs::copy(src_path, dst_file_path)?;
-        } else {
-            fs::copy(src_path, dst_path)?;
-        }
-    }
-    Ok(())
-}
-
-fn copy_dir_all(src: &Path, dst: &Path) -> io::Result<()> {
+fn copy_dir_all(src: &Path, dst: &Path, force: bool) -> io::Result<()> {
     if !dst.exists() {
         fs::create_dir_all(dst)?;
     }
@@ -1017,32 +1236,13 @@ fn copy_dir_all(src: &Path, dst: &Path) -> io::Result<()> {
         let dst_path: PathBuf = dst.join(entry.file_name());
 
         if ty.is_dir() {
-            copy_dir_all(&src_path, &dst_path)?;
+            copy_dir_all(&src_path, &dst_path, force)?;
         } else {
-            fs::copy(&src_path, &dst_path)?;
-        }
-    }
-    Ok(())
-}
-
-fn move_item(src: &str, dst: &str) -> io::Result<()> {
-    let src_path: &Path = Path::new(src);
-    let dst_path: &Path = Path::new(dst);
-
-    if src_path.is_dir() {
-        if dst_path.exists() && dst_path.is_dir() {
-            let new_dst: PathBuf = dst_path.join(src_path.file_name().unwrap());
-            fs::rename(src_path, new_dst)?;
-        } else {
-            fs::rename(src_path, dst_path)?;
-        }
-    } else {
-        if dst_path.is_dir() {
-            let file_name: &OsStr = src_path.file_name().unwrap();
-            let dst_file_path: PathBuf = dst_path.join(file_name);
-            fs::rename(src_path, dst_file_path)?;
-        } else {
-            fs::rename(src_path, dst_path)?;
+            if force || !dst_path.exists() {
+                fs::copy(&src_path, &dst_path)?;
+            } else {
+                return Err(io::Error::new(io::ErrorKind::AlreadyExists, "Destination file already exists"));
+            }
         }
     }
     Ok(())
