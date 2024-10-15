@@ -21,11 +21,11 @@ use std::{
     collections::HashMap,
     env,
     ffi::OsStr,
-    fs::{self, OpenOptions, File},
-    io::{self, Error, Write, BufReader, BufRead},
+    fs::{self, File, OpenOptions},
+    io::{self, BufRead, BufReader, Error, Write},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::{self, Command, Stdio},
+    process::{self, exit, Command, Stdio},
     time::SystemTime
 };
 use tokio::runtime::Runtime;
@@ -33,6 +33,7 @@ use whoami::fallible;
 
 const NO_RESULT: &str = "";
 
+#[derive(Debug)]
 pub struct Config
 {
     rules: HashMap<String, String>,
@@ -72,48 +73,14 @@ impl Config
             temp_rules: HashMap::new(),
         })
     }
-    pub fn set_rule(&mut self, rule: String, value: String, temp: bool)
-    {
-        if temp
-        {
-            if self.temp_rules.contains_key::<String>(&rule)
-            {
-                self.temp_rules.entry(rule).and_modify(|v| *v = value);
-            }
-            else {
-                self.temp_rules.insert(rule, value);
-            }
-        }
-        else 
-        {
-            if self.rules.contains_key(&rule)
-            {
-                self.rules.entry(rule).and_modify(|v| *v = value);
-            }
-            else {
-                self.rules.insert(rule, value);
-            }
-        }
+    pub fn set_rule(&mut self, rule: &str, value: &str, temp: bool) {
+        let rules: &mut HashMap<String, String> = if temp { &mut self.temp_rules } else { &mut self.rules };
+        rules.insert(rule.to_string(), value.to_string());
     }
-    pub fn get_rule(&mut self, rule: String, temp: bool) -> String
-    {
-        if temp
-        {
-            if self.temp_rules.contains_key(&rule)
-            {
-                return self.temp_rules.get(&rule).unwrap_or(&"None".to_owned()).to_owned();
-            }
-            else {
-                return "None".to_owned();
-            }
-        }
-        if self.rules.contains_key(&rule)
-        {
-            return self.rules.get(&rule).unwrap_or(&"None".to_owned()).to_owned();
-        }
-        else {
-            return "None".to_owned();
-        }
+
+    pub fn get_rule(&self, rule: &str, temp: bool) -> Option<&str> {
+        let rules: &HashMap<String, String> = if temp { &self.temp_rules } else { &self.rules };
+        rules.get(rule).map(String::as_str)
     }
 }
 
@@ -127,20 +94,32 @@ fn main() {
     runtime.block_on(async {
         let args: Vec<String> = std::env::args().collect();
         env::set_var("0", "nash");
+        let mut conf: Config = match Config::new()
+        {
+            Ok(c) => c,
+            Err(_) => {eprintln!("An error occurred when initializing the config."); exit(1)}
+        };
+        let mut state: ShellState = ShellState {
+            cwd: std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("/"))
+                .to_string_lossy()
+                .to_string(),
+            hostname: fallible::hostname().unwrap(),
+            username: fallible::username().unwrap(),
+        };
+        env::set_var("IV", eval(&mut state, &mut conf, "env".to_owned()));
+        let _ = clear_screen();
         if args.len() <= 1 {
-            let mut state: ShellState = ShellState {
-                cwd: std::env::current_dir()
-                    .unwrap_or_else(|_| std::path::PathBuf::from("/"))
-                    .to_string_lossy()
-                    .to_string(),
-                hostname: fallible::hostname().unwrap(),
-                username: fallible::username().unwrap(),
-            };
-            repl(&mut state);
+            repl(&mut state, &mut conf);
         } else {
-            handle_nash_args(args).await;
+            handle_nash_args(&mut conf, args).await;
         }
     });
+}
+
+fn clear_screen() -> io::Result<()> {
+    print!("\x1B[2J\x1B[H");
+    io::stdout().flush()
 }
 
 fn parse_args(args: &[String]) -> HashMap<String, Option<String>> {
@@ -244,7 +223,7 @@ impl Highlighter for ShellHelper {
     }
 }
 
-fn repl(state: &mut ShellState) {
+fn repl(state: &mut ShellState, conf: &mut Config) {
     let history_file: PathBuf = get_history_file_path();
     let helper: ShellHelper = ShellHelper {
         completer: AutoCompleter::new(PathBuf::from(&state.cwd)),
@@ -265,7 +244,7 @@ fn repl(state: &mut ShellState) {
             Ok(line) => {
                 rl.add_history_entry(line.as_str());
                 rl.save_history(&history_file).unwrap();
-                let result: String = eval(state, line);
+                let result: String = eval(state, conf, line);
                 print(result);
 
                 // Update the current directory in the AutoCompleter
@@ -310,11 +289,11 @@ fn get_alias_file_path() -> PathBuf {
     path
 }
 
-fn eval(state: &mut ShellState, cmd: String) -> String {
+fn eval(state: &mut ShellState, conf: &mut Config, cmd: String) -> String {
     let chars_to_check: [char; 3] = [';', '|', '>'];
 
     if cmd.contains(|c| chars_to_check.contains(&c)) {
-        return special_eval(state, cmd);
+        return special_eval(state, conf, cmd);
     }
 
     let expanded_cmd: String = expand_env_vars(&cmd);
@@ -365,7 +344,7 @@ fn eval(state: &mut ShellState, cmd: String) -> String {
         "alias" => handle_alias(&expanded_cmd_parts),
         "rmalias" => handle_remove_alias(&expanded_cmd_parts),
         "help" => show_help(),
-        "finfo" => file_info(state, &expanded_cmd_parts),
+        "set" => manage_config(conf, &expanded_cmd_parts),
         _ => {
             // If not a built-in command, execute as an external command
             let result: String = execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts);
@@ -377,9 +356,9 @@ fn eval(state: &mut ShellState, cmd: String) -> String {
     }
 }
 
-fn file_info(state: &ShellState, cmd: &Vec<String>) -> String
+fn manage_config(conf: &mut Config, cmd: &Vec<String>) -> String
 {
-    todo!()
+    format!("{:?} {:?}", conf, cmd)
 }
 
 fn show_help() -> String {
@@ -397,7 +376,7 @@ fn show_help() -> String {
      help: Display this help menu".to_owned()
 }
 
-fn special_eval(state: &mut ShellState, cmd: String) -> String {
+fn special_eval(state: &mut ShellState, conf: &mut Config, cmd: String) -> String {
     let mut result: String = String::new();
     let commands: Vec<String> = cmd.split(';').map(|s| s.trim().to_owned()).collect();
 
@@ -405,9 +384,9 @@ fn special_eval(state: &mut ShellState, cmd: String) -> String {
         if command.contains("|") {
             result = pipe_eval(command);
         } else if command.contains(">") {
-            result = out_redir_eval(state, command);
+            result = out_redir_eval(state, conf, command);
         } else {
-            result = eval(state, command);
+            result = eval(state, conf, command);
         }
     }
     result
@@ -449,7 +428,7 @@ fn pipe_eval(cmd: String) -> String {
     input
 }
 
-fn out_redir_eval(state: &mut ShellState, cmd: String) -> String {
+fn out_redir_eval(state: &mut ShellState, conf: &mut Config, cmd: String) -> String {
     let parts: Vec<String> = if cmd.contains("2>>") {
         cmd.splitn(2, "2>>").map(|s| s.trim().to_owned()).collect()
     } else if cmd.contains(">>") {
@@ -478,7 +457,7 @@ fn out_redir_eval(state: &mut ShellState, cmd: String) -> String {
 
     match file_options.open(&file_path) {
         Ok(mut file) => {
-            let output: String = eval(state, command);
+            let output: String = eval(state, conf, command);
             match file.write_all(output.as_bytes()) {
                 Ok(_) => NO_RESULT.to_owned(),
                 Err(e) => format!("Failed to write to file: {}", e),
@@ -1081,7 +1060,7 @@ fn handle_cd(state: &mut ShellState, cmd_parts: &[String]) -> String {
 
 
 // TODO: use parse_args() in handling nash's arguments.
-async fn handle_nash_args(args: Vec<String>) {
+async fn handle_nash_args(conf: &mut Config, args: Vec<String>) {
     // Check if arg 1 is a path, if so, run it as a series of commands (like bash's .sh running impl) (scripting)
     // PLACEHOLDER, WILL NOT WORK LIKE INTENDED!!
     if args.len() > 1 && Path::new(&args[1]).exists() {
@@ -1097,7 +1076,7 @@ async fn handle_nash_args(args: Vec<String>) {
                     username: fallible::username().unwrap(),
                 };
                 for line in contents.lines() {
-                    let result: String = eval(&mut state, line.to_string());
+                    let result: String = eval(&mut state, conf, line.to_string());
                     print(result);
                 }
             }
