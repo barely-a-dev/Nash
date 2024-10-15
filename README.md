@@ -91,7 +91,8 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
   - -p: Create parent directories as needed
 - history: Display command history
 - exit: Exit the shell
-- summon <command>: Open an *external* command in a new terminal window
+- summon [-w] <command>: Open an *external* command in a new terminal window
+  - -w: Wait for process exit before continuing
 - alias <identifier>[=original]: Create an alias for a command
 - rmalias <identifier>: Remove an alias for a command
 - help: Display a help menu
@@ -124,9 +125,9 @@ If you're not sure where to start, check out the [issues](https://github.com/bar
 ### Checklist
 
 The following features and improvements are planned for future releases:
-(Note: "-" means WIP and partially implemented but unstable, while "/" means WIP but not public. ✔ of course means implemented.)
+(Note: "-" means WIP and but possibly partially implemented/unstable, while "/" means WIP but not public. ✔ of course means implemented.)
 - [-] Environment variables management system
-- [/] Enhanced command auto-completion
+- [-] Enhanced command auto-completion
 - [ ] Robust configuration system
 - [ ] Quoting and escaping mechanisms
 - [✔] Alias command support

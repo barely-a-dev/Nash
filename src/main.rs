@@ -1,6 +1,6 @@
 // Important TODOs: Fix updating, which evidently never worked.
-// MAJOR TODOs: export for env vars, CONFIG, set/unset for setting temp config (easy?), quotes and escaping ('', "", \)
-// Absolutely HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables), wildcards/regex (*, ?, []).
+// MAJOR TODOs: export for env vars, CONFIG, set/unset for setting temp config (easy?), quotes and escaping ('', "", \), wildcards/regex (*, ?, [])
+// Absolutely HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables).
 pub mod editing;
 
 use crate::editing::*;
@@ -21,8 +21,8 @@ use std::{
     collections::HashMap,
     env,
     ffi::OsStr,
-    fs::{self, OpenOptions},
-    io::{self, Error, Write},
+    fs::{self, OpenOptions, File},
+    io::{self, Error, Write, BufReader, BufRead},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{self, Command, Stdio},
@@ -32,6 +32,90 @@ use tokio::runtime::Runtime;
 use whoami::fallible;
 
 const NO_RESULT: &str = "";
+
+pub struct Config
+{
+    rules: HashMap<String, String>,
+    temp_rules: HashMap<String, String>
+}
+
+impl Config
+{
+    pub fn new() -> Result<Self, std::io::Error> {
+        let mut rules: HashMap<String, String> = HashMap::new();
+        let config_path: PathBuf = get_nash_dir().join("config");
+
+        if !config_path.exists() {
+            // Create the directory if it doesn't exist
+            std::fs::create_dir_all(config_path.parent().unwrap())?;
+            
+            // Create an empty config file
+            File::create(&config_path)?;
+        }
+
+        // Read and parse the config file
+        let file: File = File::open(&config_path)?;
+        let reader: BufReader<File> = BufReader::new(file);
+
+        for line in reader.lines() {
+            let line = line?;
+            if let Some((rule, value)) = line.split_once('=') {
+                rules.insert(
+                    rule.trim().to_string(),
+                    value.trim_end_matches(';').trim().to_string(),
+                );
+            }
+        }
+
+        Ok(Config {
+            rules,
+            temp_rules: HashMap::new(),
+        })
+    }
+    pub fn set_rule(&mut self, rule: String, value: String, temp: bool)
+    {
+        if temp
+        {
+            if self.temp_rules.contains_key::<String>(&rule)
+            {
+                self.temp_rules.entry(rule).and_modify(|v| *v = value);
+            }
+            else {
+                self.temp_rules.insert(rule, value);
+            }
+        }
+        else 
+        {
+            if self.rules.contains_key(&rule)
+            {
+                self.rules.entry(rule).and_modify(|v| *v = value);
+            }
+            else {
+                self.rules.insert(rule, value);
+            }
+        }
+    }
+    pub fn get_rule(&mut self, rule: String, temp: bool) -> String
+    {
+        if temp
+        {
+            if self.temp_rules.contains_key(&rule)
+            {
+                return self.temp_rules.get(&rule).unwrap_or(&"None".to_owned()).to_owned();
+            }
+            else {
+                return "None".to_owned();
+            }
+        }
+        if self.rules.contains_key(&rule)
+        {
+            return self.rules.get(&rule).unwrap_or(&"None".to_owned()).to_owned();
+        }
+        else {
+            return "None".to_owned();
+        }
+    }
+}
 
 struct ShellState {
     cwd: String,
@@ -207,7 +291,7 @@ fn repl(state: &mut ShellState) {
     }
 }
 
-fn get_prog_dir() -> PathBuf {
+fn get_nash_dir() -> PathBuf {
     let mut path: PathBuf = dirs::home_dir().expect("Unable to get home directory");
     path.push(".nash");
     fs::create_dir_all(&path).expect("Unable to create .nash directory");
@@ -215,13 +299,13 @@ fn get_prog_dir() -> PathBuf {
 }
 
 fn get_history_file_path() -> PathBuf {
-    let mut path: PathBuf = get_prog_dir();
+    let mut path: PathBuf = get_nash_dir();
     path.push("history");
     path
 }
 
 fn get_alias_file_path() -> PathBuf {
-    let mut path: PathBuf = get_prog_dir();
+    let mut path: PathBuf = get_nash_dir();
     path.push("alias");
     path
 }
@@ -307,7 +391,7 @@ fn show_help() -> String {
      mkdir [-p] <directory>: Create a new directory\n\
      history: Display command history\n\
      exit: Exit the shell\n\
-     summon <command>: Open an *external* command in a new terminal window\n\
+     summon [-w] <command>: Open an *external* command in a new terminal window\n\
      alias <identifier>[=original]: Create an alias for a command\n\
      rmalias <identifier>: Remove an alias for a command\n\
      help: Display this help menu".to_owned()
@@ -444,6 +528,9 @@ fn expand_env_vars(cmd: &str) -> String {
 }
 
 fn handle_summon(cmd_parts: &[String]) -> String {
+    let args: HashMap<String, Option<String>> = parse_args(cmd_parts);
+    let wait_for_exit: bool = args.contains_key("w");
+    
     if cmd_parts.len() >= 2 {
         let executable: &String = &cmd_parts[1];
         let args: Vec<&String> = cmd_parts.iter().skip(2).collect();
@@ -544,7 +631,16 @@ fn handle_summon(cmd_parts: &[String]) -> String {
         };
 
         match result {
-            Ok(child) => return child.id().to_string(),
+            Ok(mut child) => {
+                if wait_for_exit {
+                    match child.wait() {
+                        Ok(status) => return format!("Process exited with status: {}", status),
+                        Err(e) => return format!("Error waiting for process: {}", e),
+                    }
+                } else {
+                    return child.id().to_string()
+                }
+            },
             Err(e) => return format!("An error occurred: {} (Command: {})", e, executable),
         }
     } else {
@@ -1133,15 +1229,18 @@ async fn update_nash() {
         }
     }
 
-    // Copy the binary to /usr/bin/nash (doesn't work.)
-    println!("Copying the binary to /usr/local/bin/nash... (If there is an error, run the following command: \"sudo cp /tmp/nash_update/target/release/nash /usr/bin/nash && sudo rm -rf /tmp/nash_update\" to manually finish the update.)");
-    match Command::new("sudo").args(&["cp", "target/release/nash", "/usr/bin/nash"]).status() {
-        Ok(status) if status.success() => println!("Binary copied successfully."),
+    // Copy the binary to /usr/bin/nash (doesn't work.) Best idea to fix requires "summon cp" (an internal command while summon only supports external commands. Summoning internal commands requires a -c nash flag that takes a command and runs it. (So summon cp will do summon nash -c cp))
+    println!("Copying the binary to /usr/local/bin/nash...");
+    println!("When the window pops up, enter your password and press enter.");
+    match Command::new("echo").args(&["cp", "target/release/nash", "/usr/bin/nash", ">> copy.sh"]).status() {
+        Ok(status) if status.success() => println!("Copy script created successfully."),
         _ => {
-            println!("Failed to copy the binary to /usr/bin/nash");
+            println!("Failed to create the copy script.");
             return;
         }
     }
+
+    println!("{}", handle_summon(&["-w".to_owned(), format!("\'cd /tmp/{} && sudo chmod +x ./copy.sh && sudo ./copy.sh\'", temp_dir.to_string_lossy().to_string())]));
 
     // Clean up
     fs::remove_dir_all(&temp_dir).expect("Failed to remove temp directory");

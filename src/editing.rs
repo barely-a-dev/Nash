@@ -178,7 +178,7 @@ impl Hinter for CommandHinter {
             "mkdir" => Some(" [-p] <directory>".to_string()),
             "history" => Some("".to_string()),
             "exit" => Some("".to_string()),
-            "summon" => Some(" <command>".to_string()),
+            "summon" => Some(" [-w] <command>".to_string()),
             "alias" => Some(" <identifier>[=<command>]".to_string()),
             "rmalias" => Some(" <identifier>".to_string()),
             "help" => Some("".to_string()),
