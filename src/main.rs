@@ -212,21 +212,19 @@ fn repl(state: &mut ShellState, conf: &mut Config) {
             }
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");
-                conf.save_rules();
                 break;
             }
             Err(ReadlineError::Eof) => {
                 println!("CTRL-D");
-                conf.save_rules();
                 break;
             }
             Err(err) => {
                 println!("Error: {:?}", err);
-                conf.save_rules();
                 break;
             }
         }
     }
+    conf.save_rules();
 }
 
 fn get_nash_dir() -> PathBuf {
@@ -308,7 +306,7 @@ fn eval(state: &mut ShellState, conf: &mut Config, cmd: String) -> String {
             // If not a built-in command, execute as an external command
             let result: String = execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts);
             if !result.is_empty() {
-                println!("{}", result);
+                return format!("{}", result);
             }
             NO_RESULT.to_owned()
         }
@@ -1153,6 +1151,11 @@ fn handle_ls(state: &ShellState, cmd_parts: &[String]) -> String {
 
 fn list_directory(path: &Path, long_format: bool, show_hidden: bool) -> String {
     let mut out: String = String::new();
+    if path.is_file()
+    {
+        let md: fs::Metadata = fs::metadata(path).unwrap_or(fs::metadata("/etc/fstab").unwrap());
+        return format!("{}", color_filetype(md.file_type(), &path.to_string_lossy()));
+    }
 
     match fs::read_dir(path) {
         Ok(entries) => {
@@ -1177,24 +1180,7 @@ fn list_directory(path: &Path, long_format: bool, show_hidden: bool) -> String {
                 } else {
                     let file_t: fs::FileType = entry.file_type().unwrap();
                     
-                    let styled_output = if file_t.is_dir() {
-                        Style::new().fg(Color::Blue).bold().apply_to(&file_name_str)
-                    } else if file_t.is_file() {
-                        let extension: &str = file_name_str.split('.').last().unwrap_or("");
-                        match extension {
-                            "sh" | "bash" | "zsh" | "fish" => Style::new().fg(Color::Green).apply_to(&file_name_str),
-                            "tar" | "tgz" | "gz" | "zip" | "rar" | "7z" => Style::new().fg(Color::Red).apply_to(&file_name_str),
-                            "jpg" | "jpeg" | "gif" | "png" | "bmp" => Style::new().fg(Color::Magenta).apply_to(&file_name_str),
-                            "mp3" | "wav" | "flac" => Style::new().fg(Color::Cyan).apply_to(&file_name_str),
-                            "pdf" | "epub" | "mobi" => Style::new().fg(Color::Yellow).apply_to(&file_name_str),
-                            "exe" | "dll" => Style::new().fg(Color::Green).bold().apply_to(&file_name_str),
-                            _ => Style::new().apply_to(&file_name_str),
-                        }
-                    } else if file_t.is_symlink() {
-                        Style::new().fg(Color::Cyan).apply_to(&file_name_str)
-                    } else {
-                        Style::new().apply_to(&file_name_str)
-                    };
+                    let styled_output: console::StyledObject<&_> = color_filetype(file_t, &file_name_str);
                     
                     out.push_str(&format!("{} ", styled_output));
                 }
@@ -1210,6 +1196,28 @@ fn list_directory(path: &Path, long_format: bool, show_hidden: bool) -> String {
             format!("Failed to read directory: {} ({})", path.display(), e)
         }
     }
+}
+
+fn color_filetype<'a>(file_t: fs::FileType, file_name_str: &'a Cow<'a, str>) ->  console::StyledObject<&'a Cow<'a, str>>
+{
+    return if file_t.is_dir() {
+        Style::new().fg(Color::Blue).bold().apply_to(&file_name_str)
+    } else if file_t.is_file() {
+        let extension: &str = file_name_str.split('.').last().unwrap_or("");
+        match extension {
+            "sh" | "bash" | "zsh" | "fish" => Style::new().fg(Color::Green).apply_to(&file_name_str),
+            "tar" | "tgz" | "gz" | "zip" | "rar" | "7z" => Style::new().fg(Color::Red).apply_to(&file_name_str),
+            "jpg" | "jpeg" | "gif" | "png" | "bmp" => Style::new().fg(Color::Magenta).apply_to(&file_name_str),
+            "mp3" | "wav" | "flac" => Style::new().fg(Color::Cyan).apply_to(&file_name_str),
+            "pdf" | "epub" | "mobi" => Style::new().fg(Color::Yellow).apply_to(&file_name_str),
+            "exe" | "dll" => Style::new().fg(Color::Green).bold().apply_to(&file_name_str),
+            _ => Style::new().apply_to(&file_name_str),
+        }
+    } else if file_t.is_symlink() {
+        Style::new().fg(Color::Cyan).apply_to(&file_name_str)
+    } else {
+        Style::new().apply_to(&file_name_str)
+    };
 }
 
 fn list_directory_entry(path: &Path, long_format: bool) -> String {
@@ -1339,12 +1347,7 @@ fn handle_cd(state: &mut ShellState, cmd_parts: &[String]) -> String {
             "No directory passed. Usage: cd <directory>".to_owned()
         }
         2 => {
-            let new_path: PathBuf = if cmd_parts[1] == ".." {
-                PathBuf::from(&state.cwd)
-                    .parent()
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|| PathBuf::from("/"))
-            } else if cmd_parts[1].starts_with('/') {
+            let new_path: PathBuf = if cmd_parts[1].starts_with('/') {
                 PathBuf::from(&cmd_parts[1])
             } else {
                 PathBuf::from(&state.cwd).join(&cmd_parts[1])
