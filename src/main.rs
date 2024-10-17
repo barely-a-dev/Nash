@@ -2,11 +2,14 @@
 // MAJOR TODOs: export for env vars, CONFIG, set/unset for setting temp config (easy?), quotes and escaping ('', "", \), wildcards/regex (*, ?, [])
 // Absolutely HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables).
 pub mod editing;
+pub mod config;
 
 use crate::editing::*;
+use crate::config::*;
 use chrono::{DateTime, Local};
 use dirs;
 use git2::Repository;
+use libc::{getgrgid, getpwuid};
 use rustyline::{
     completion::{Completer, Pair},
     error::ReadlineError,
@@ -16,73 +19,25 @@ use rustyline::{
     Context, Editor,
 };
 use rustyline_derive::Helper;
+use std::process::Child;
 use std::{
+    ptr,
     borrow::Cow,
     collections::HashMap,
     env,
-    ffi::OsStr,
-    fs::{self, File, OpenOptions},
-    io::{self, BufRead, BufReader, Error, Write},
-    os::unix::fs::PermissionsExt,
+    ffi::{OsStr, CStr},
+    fs::{self, remove_file, File, OpenOptions},
+    io::{self, Error, Write},
+    os::unix::fs::{PermissionsExt, MetadataExt},
     path::{Path, PathBuf},
     process::{self, exit, Command, Stdio},
     time::SystemTime
 };
 use tokio::runtime::Runtime;
 use whoami::fallible;
+use console::{Style, Color};
 
 const NO_RESULT: &str = "";
-
-#[derive(Debug)]
-pub struct Config
-{
-    rules: HashMap<String, String>,
-    temp_rules: HashMap<String, String>
-}
-
-impl Config
-{
-    pub fn new() -> Result<Self, std::io::Error> {
-        let mut rules: HashMap<String, String> = HashMap::new();
-        let config_path: PathBuf = get_nash_dir().join("config");
-
-        if !config_path.exists() {
-            // Create the directory if it doesn't exist
-            std::fs::create_dir_all(config_path.parent().unwrap())?;
-            
-            // Create an empty config file
-            File::create(&config_path)?;
-        }
-
-        // Read and parse the config file
-        let file: File = File::open(&config_path)?;
-        let reader: BufReader<File> = BufReader::new(file);
-
-        for line in reader.lines() {
-            let line = line?;
-            if let Some((rule, value)) = line.split_once('=') {
-                rules.insert(
-                    rule.trim().to_string(),
-                    value.trim_end_matches(';').trim().to_string(),
-                );
-            }
-        }
-
-        Ok(Config {
-            rules,
-            temp_rules: HashMap::new(),
-        })
-    }
-    pub fn set_rule(&mut self, rule: &str, value: &str, temp: bool) {
-        let rules: &mut HashMap<String, String> = if temp { &mut self.temp_rules } else { &mut self.rules };
-        rules.insert(rule.to_string(), value.to_string());
-    }
-
-    pub fn get_rule(&self, rule: &str, temp: bool) -> Option<&str> {
-        let rules: &HashMap<String, String> = if temp { &self.temp_rules } else { &self.rules };
-        rules.get(rule).map(String::as_str)
-    }
-}
 
 struct ShellState {
     cwd: String,
@@ -108,8 +63,8 @@ fn main() {
             username: fallible::username().unwrap(),
         };
         env::set_var("IV", eval(&mut state, &mut conf, "env".to_owned()));
-        let _ = clear_screen();
         if args.len() <= 1 {
+            let _ = clear_screen();
             repl(&mut state, &mut conf);
         } else {
             handle_nash_args(&mut conf, args).await;
@@ -117,13 +72,14 @@ fn main() {
     });
 }
 
-fn clear_screen() -> io::Result<()> {
-    print!("\x1B[2J\x1B[H");
-    io::stdout().flush()
+fn clear_screen() -> io::Result<Child> {
+    Command::new("clear").spawn()
 }
 
-fn parse_args(args: &[String]) -> HashMap<String, Option<String>> {
+fn parse_args(args: &[String]) -> (Vec<String>, HashMap<String, Option<String>>) {
+    let value_args: Vec<String> = Vec::from(["".to_owned()]);
     let mut parsed_args: HashMap<String, Option<String>> = HashMap::new();
+    let mut non_flag_args: Vec<String> = Vec::new();
     let mut i: usize = 1; // Start from 1 to skip the program name
 
     while i < args.len() {
@@ -132,7 +88,7 @@ fn parse_args(args: &[String]) -> HashMap<String, Option<String>> {
         if arg.starts_with("--") {
             // Long option
             let option: String = arg[2..].to_string();
-            if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+            if i + 1 < args.len() && !args[i + 1].starts_with('-') && value_args.contains(&args[i + 1]) {
                 // Option with value
                 parsed_args.insert(option, Some(args[i + 1].clone()));
                 i += 2;
@@ -146,7 +102,7 @@ fn parse_args(args: &[String]) -> HashMap<String, Option<String>> {
             let options: Vec<char> = arg[1..].chars().collect();
             for (j, opt) in options.iter().enumerate() {
                 let option: String = opt.to_string();
-                if j == options.len() - 1 && i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                if j == options.len() - 1 && i + 1 < args.len() && !args[i + 1].starts_with('-') && value_args.contains(&args[i + 1]) {
                     // Last option in group with value
                     parsed_args.insert(option, Some(args[i + 1].clone()));
                     i += 1;
@@ -158,12 +114,12 @@ fn parse_args(args: &[String]) -> HashMap<String, Option<String>> {
             i += 1;
         } else {
             // Non-option argument
-            parsed_args.insert(arg.clone(), None);
+            non_flag_args.push(arg.clone());
             i += 1;
         }
     }
 
-    parsed_args
+    (non_flag_args, parsed_args)
 }
 
 #[derive(Helper)]
@@ -256,14 +212,17 @@ fn repl(state: &mut ShellState, conf: &mut Config) {
             }
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");
+                conf.save_rules();
                 break;
             }
             Err(ReadlineError::Eof) => {
                 println!("CTRL-D");
+                conf.save_rules();
                 break;
             }
             Err(err) => {
                 println!("Error: {:?}", err);
+                conf.save_rules();
                 break;
             }
         }
@@ -296,12 +255,8 @@ fn eval(state: &mut ShellState, conf: &mut Config, cmd: String) -> String {
         return special_eval(state, conf, cmd);
     }
 
-    let expanded_cmd: String = expand_env_vars(&cmd);
-    let cmd_parts: Vec<String> = expanded_cmd
-        .trim()
-        .split_whitespace()
-        .map(String::from)
-        .collect();
+    let expanded_cmd: String = expand(state, &cmd);
+    let cmd_parts: Vec<String> = split_command(&expanded_cmd);
 
     if cmd_parts.is_empty() {
         return "Empty command".to_owned();
@@ -344,7 +299,11 @@ fn eval(state: &mut ShellState, conf: &mut Config, cmd: String) -> String {
         "alias" => handle_alias(&expanded_cmd_parts),
         "rmalias" => handle_remove_alias(&expanded_cmd_parts),
         "help" => show_help(),
-        "set" => manage_config(conf, &expanded_cmd_parts),
+        "set" => set_conf_rule(conf, &expanded_cmd_parts),
+        "unset" => unset_conf_rule(conf, &expanded_cmd_parts),
+        "rconf" => read_conf(conf, &expanded_cmd_parts),
+        "reset" => reset(conf, state, get_nash_dir()),
+        "pwd" => state.cwd.clone(),
         _ => {
             // If not a built-in command, execute as an external command
             let result: String = execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts);
@@ -356,9 +315,194 @@ fn eval(state: &mut ShellState, conf: &mut Config, cmd: String) -> String {
     }
 }
 
-fn manage_config(conf: &mut Config, cmd: &Vec<String>) -> String
+fn reset(conf: &mut Config, state: &mut ShellState, nash_dir: PathBuf) -> String
 {
-    format!("{:?} {:?}", conf, cmd)
+    conf.rules = HashMap::new();
+    conf.temp_rules = HashMap::new();
+    state.cwd = "/".to_owned();
+
+    match conf.get_rule("delete_on_reset", true)
+    {
+        None =>
+        {
+            match File::create(nash_dir.join("config"))
+            {
+                Ok(_) => println!("Successfully erased config."),
+                Err(e) => eprintln!("Could not erase config. Error: {}", e)
+            }
+            match File::create(nash_dir.join("history"))
+            {
+                Ok(_) => println!("Successfully erased history."),
+                Err(e) => eprintln!("Could not erase history. Error: {}", e)
+            }
+            match File::create(nash_dir.join("alias"))
+            {
+                Ok(_) => println!("Successfully erased aliases."),
+                Err(e) => eprintln!("Could not erase aliases. Error: {}", e)
+            }
+        }
+        Some(v) =>
+        {
+            if v.parse::<bool>().unwrap_or(false) {
+                let nash_dir_disp = nash_dir.display().to_string();
+                match remove_file("/usr/bin/nash") {
+                    Ok(_) => println!("Successfully deleted /usr/bin/nash."),
+                    Err(e) => eprintln!("Could not delete /usr/bin/nash file. Error: {}", e)
+                }
+                match fs::remove_dir_all(&nash_dir) {
+                    Ok(_) => println!("Successfully deleted {}.", nash_dir_disp),
+                    Err(e) => eprintln!("Could not delete {} directory. Error: {}", nash_dir_disp, e)
+                }
+            }            
+        }
+    }
+
+    exit(1000);
+}
+
+fn split_command(cmd: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut escaped = false;
+
+    for c in cmd.trim().chars() {
+        match c {
+            '"' if !escaped => {
+                in_quotes = !in_quotes;
+                if !in_quotes && !current.is_empty() {
+                    result.push(std::mem::take(&mut current));
+                }
+            }
+            ' ' if !in_quotes && !escaped => {
+                if !current.is_empty() {
+                    result.push(std::mem::take(&mut current));
+                }
+            }
+            '\\' if !escaped => {
+                escaped = true;
+            }
+            _ => {
+                if escaped {
+                    escaped = false;
+                }
+                current.push(c);
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        result.push(current);
+    }
+
+    result
+}
+
+fn set_conf_rule(conf: &mut Config, cmd: &Vec<String>) -> String {
+    if cmd.len() < 2 {
+        return "Usage: set <flag> OR set <option> <value>".to_owned();
+    }
+    let set: bool;
+
+    match cmd.len() {
+        2 => {
+            // Command is in "set <flag>" format
+            let flag: &str = &cmd[1].trim_start_matches('-');
+            match flag
+            {
+                "e" => conf.set_rule("error", "true", true),
+                "d" => conf.set_rule("delete_on_reset", "true", true),
+                _ => conf.set_rule(flag, "true", false)
+            }
+            set = true;
+        }
+        3 => {
+            // Command is in "set <option> <value>" format
+            let option: &str = &cmd[1];
+            let value: &String = &cmd[2];
+            match option
+            {
+                "error" => conf.set_rule("error", value, true),
+                "delete_on_reset" => conf.set_rule("delete_on_reset", value, true),
+                _ => conf.set_rule(&option, &value, false)
+            }
+            set = true;
+        }
+        4 => {
+            // Command is in "set <option> <value>" format
+            let option: &str = &cmd[1];
+            let value: &String = &cmd[2];
+            let temp: &bool = &cmd[3].parse::<bool>().unwrap_or(true);
+            match option
+            {
+                "error" => conf.set_rule("error", value, *temp),
+                "delete_on_reset" => conf.set_rule("delete_on_reset", value, *temp),
+                _ => conf.set_rule(&option, &value, *temp)
+            }
+            set = true;
+        }
+        _ => {
+            // Invalid usage
+            return "Invalid usage. Use 'set <flag>' or 'set <option> <value>'.".to_owned()
+        }
+    }
+    if set
+    {
+        conf.save_rules();
+    }
+    return if set {"Successfully set option".to_owned()} else {"Failed to set option".to_owned()}
+}
+
+fn unset_conf_rule(conf: &mut Config, cmd: &Vec<String>) -> String
+{
+    let mut errored: bool = false;
+    if cmd.len() == 3
+    {
+        let temp: bool = match cmd[2].parse::<bool>()
+        {
+            Ok(b) => b,
+            Err(_) => {errored = true; false}
+        };
+        if errored
+        {
+            return "You must specify whether the rule is in the temporary or consistent rules.".to_owned();
+        }
+        conf.remove_rule(&cmd[1], temp).unwrap_or(("".to_owned(), "".to_owned())).1
+    }
+    else {
+        "Usage: unset <option> <temp>".to_owned()
+    }
+}
+
+fn read_conf(conf: &Config, cmd: &Vec<String>) -> String
+{
+    if cmd.len() == 3
+    {
+        let temp: bool = match cmd[2].parse::<bool>()
+        {
+            Ok(b) => b,
+            Err(e) => {println!("Could not determine whether searching the temporary list or consistent rules. Assuming consistent. Recieved error: {}", e); false}
+        };
+        return match conf.get_rule(&cmd[1], temp)
+        {
+            None => "Rule not set.".to_owned(),
+            Some(s) => s.to_owned()
+        };
+    } else if cmd.len() == 2
+    {
+        return match conf.get_rule(&cmd[1], false)
+        {
+            None => format!("Rule not set in consistent, checking temporary.\n{}", match conf.get_rule(&cmd[1], true)
+        {
+            None => "Rule not set in temporary",
+            Some(c) => c
+        }).to_owned(),
+            Some(s) => s.to_owned()
+        };
+    }
+    else {
+        "Usage: rconf <option> [temp(bool)]".to_owned()
+    }
 }
 
 fn show_help() -> String {
@@ -373,7 +517,11 @@ fn show_help() -> String {
      summon [-w] <command>: Open an *external* command in a new terminal window\n\
      alias <identifier>[=original]: Create an alias for a command\n\
      rmalias <identifier>: Remove an alias for a command\n\
-     help: Display this help menu".to_owned()
+     help: Display this help menu\n\
+     set <<<option> <value>>/<flag>>: Set a config rule to true or value\n\
+     unset <option> <temp(bool)>: Unset a config rule (unimplemented)\n\
+     reset: Reset the application, erase if delete_on_reset rule is true\n\
+     rconf <option> [temp(bool)]: Read the value of a config rule (unimplemented)".to_owned()
 }
 
 fn special_eval(state: &mut ShellState, conf: &mut Config, cmd: String) -> String {
@@ -467,6 +615,62 @@ fn out_redir_eval(state: &mut ShellState, conf: &mut Config, cmd: String) -> Str
     }
 }
 
+fn expand(state: &mut ShellState, cmd: &str) -> String {
+    expand_dots(state, &expand_env_vars(&expand_home(cmd).to_string()))
+}
+
+fn expand_dots(state: &ShellState, cmd: &str) -> String {
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let mut result = Vec::new();
+
+    for part in parts {
+        let expanded = if part.contains('.') {
+            let path = Path::new(part);
+            let mut components = Vec::new();
+
+            for component in path.components() {
+                match component {
+                    std::path::Component::CurDir => {
+                        components.push(state.cwd.clone());
+                    },
+                    std::path::Component::ParentDir => {
+                        if !components.is_empty() {
+                            components.pop();
+                        } else {
+                            let mut parent = PathBuf::from(&state.cwd);
+                            parent.pop();
+                            components.push(parent.to_string_lossy().into_owned());
+                        }
+                    },
+                    _ => components.push(component.as_os_str().to_string_lossy().into_owned()),
+                }
+            }
+
+            components.join("/")
+        } else {
+            part.to_string()
+        };
+
+        result.push(expanded);
+    }
+
+    result.join(" ")
+}
+
+fn expand_home(cmd: &str) -> Cow<str> {
+    if cmd.contains('~') {
+        match dirs::home_dir() {
+            Some(home) => {
+                let home_str = home.to_string_lossy();
+                Cow::Owned(cmd.replace('~', &home_str))
+            }
+            None => Cow::Borrowed(cmd),
+        }
+    } else {
+        Cow::Borrowed(cmd)
+    }
+}
+
 fn expand_env_vars(cmd: &str) -> String {
     let mut result: String = String::new();
     let mut in_var: bool = false;
@@ -507,12 +711,15 @@ fn expand_env_vars(cmd: &str) -> String {
 }
 
 fn handle_summon(cmd_parts: &[String]) -> String {
-    let args: HashMap<String, Option<String>> = parse_args(cmd_parts);
-    let wait_for_exit: bool = args.contains_key("w");
+    let (main_args, flag_args) = parse_args(cmd_parts);
+    let wait_for_exit: bool = flag_args.contains_key("w");
     
-    if cmd_parts.len() >= 2 {
-        let executable: &String = &cmd_parts[1];
-        let args: Vec<&String> = cmd_parts.iter().skip(2).collect();
+    if main_args.len() < 1 {
+        return "Usage: summon [-w] <command>".to_owned();
+    }
+
+    let executable: &String = &main_args[0];
+    let args: Vec<&String> = main_args.iter().skip(2).collect();
 
                 // List of common terminal emulators
                 let terminals: Vec<&str> = vec![
@@ -622,9 +829,6 @@ fn handle_summon(cmd_parts: &[String]) -> String {
             },
             Err(e) => return format!("An error occurred: {} (Command: {})", e, executable),
         }
-    } else {
-        "Usage: summon <external command or path to executable file> [args...]".to_owned()
-    }
 }
 
 fn env_var_eval(_state: &ShellState, cmd: String) -> String {
@@ -752,20 +956,21 @@ fn save_aliases(path: &PathBuf, aliases: &HashMap<String, String>) {
 }
 
 fn handle_cp(cmd_parts: &[String]) -> String {
-    let args: HashMap<String, Option<String>> = parse_args(cmd_parts);
-    let recursive: bool = args.contains_key("r") || args.contains_key("R");
-    let force: bool = args.contains_key("f");
+    let (main_args, flag_args) = parse_args(cmd_parts);
+    let recursive: bool = flag_args.contains_key("r") || flag_args.contains_key("R");
+    let force: bool = flag_args.contains_key("f");
 
-    if cmd_parts.len() < 3 {
+    if main_args.len() < 2 {
+        println!("{}, {}, {:#?}, {:#?}", recursive, force, main_args, flag_args);
         return "Usage: cp [-r|R] [-f] <source> <destination>".to_owned();
     }
 
-    let src: &String = &cmd_parts[cmd_parts.len() - 2];
-    let dst: &String = &cmd_parts[cmd_parts.len() - 1];
+    let src: &String = &main_args[0];
+    let dst: &String = &main_args[1];
 
     match copy_item(src, dst, recursive, force) {
         Ok(_) => "Successfully copied item.".to_owned(),
-        Err(e) => format!("An error occurred: {}", e),
+        Err(e) => format!("An error occurred: {}, {:#?}, {:#?}", e, main_args, flag_args),
     }
 }
 
@@ -800,19 +1005,19 @@ fn copy_item(src: &str, dst: &str, recursive: bool, force: bool) -> io::Result<(
 }
 
 fn handle_mv(cmd_parts: &[String]) -> String {
-    let args: HashMap<String, Option<String>> = parse_args(cmd_parts);
-    let force: bool = args.contains_key("f");
+    let (main_args, flag_args) = parse_args(cmd_parts);
+    let force: bool = flag_args.contains_key("f");
 
-    if cmd_parts.len() < 3 {
+    if main_args.len() < 2 {
         return "Usage: mv [-f] <source> <destination>".to_owned();
     }
 
-    let src: &String = &cmd_parts[cmd_parts.len() - 2];
-    let dst: &String = &cmd_parts[cmd_parts.len() - 1];
+    let src: &String = &main_args[main_args.len() - 2];
+    let dst: &String = &main_args[main_args.len() - 1];
 
     match move_item(src, dst, force) {
         Ok(_) => "Successfully moved item.".to_owned(),
-        Err(e) => format!("An error occurred: {}", e),
+        Err(e) => format!("An error occurred: {}, {}, {}", e, src, dst),
     }
 }
 
@@ -855,51 +1060,60 @@ fn move_item(src: &str, dst: &str, force: bool) -> io::Result<()> {
     Ok(())
 }
 
-
 fn handle_rm(cmd_parts: &[String]) -> String {
-    let args: HashMap<String, Option<String>> = parse_args(cmd_parts);
-    let force: bool = args.contains_key("f");
+    let (main_args, flag_args) = parse_args(cmd_parts);
+    let force: bool = flag_args.contains_key("f");
+    let recursive: bool = flag_args.contains_key("r");
 
-    if cmd_parts.len() < 2 {
-        return "Usage: rm [-f] <file>".to_owned();
+    if main_args.len() < 1 {
+        return "Usage: rm [-f] [-r] <file_or_directory>".to_owned();
     }
 
-    let file_path: &String = &cmd_parts[1];
-    let path: &Path = Path::new(file_path);
+    let path_str: &String = &main_args[0];
+    let path: &Path = Path::new(path_str);
 
-    if force {
-        match fs::remove_file(path) {
-            Ok(_) => "File removed successfully.".to_owned(),
-            Err(e) => format!("Error removing file: {}", e),
+    if !path.exists() {
+        return format!("File or directory not found: {}", path_str);
+    }
+
+    let is_dir = path.is_dir();
+
+    if is_dir && !recursive {
+        return format!("Cannot remove '{}': Is a directory. Use -r flag for recursive removal.", path_str);
+    }
+
+    if force || confirm_removal(path_str) {
+        let result: Result<(), Error> = if is_dir {
+            fs::remove_dir_all(path)
+        } else {
+            fs::remove_file(path)
+        };
+
+        match result {
+            Ok(_) => format!("{} removed successfully.", if is_dir { "Directory" } else { "File" }),
+            Err(e) => format!("Error removing {}: {}", if is_dir { "directory" } else { "file" }, e),
         }
     } else {
-        if path.exists() {
-            println!("Are you sure you want to remove {}? (y/N)", file_path);
-            let mut input: String = String::new();
-            io::stdin().read_line(&mut input).unwrap();
-            if input.trim().to_lowercase() == "y" {
-                match fs::remove_file(path) {
-                    Ok(_) => "File removed successfully.".to_owned(),
-                    Err(e) => format!("Error removing file: {}", e),
-                }
-            } else {
-                "Operation cancelled.".to_owned()
-            }
-        } else {
-            format!("File not found: {}", file_path)
-        }
+        "Operation cancelled.".to_owned()
     }
 }
 
-fn handle_mkdir(cmd_parts: &[String]) -> String {
-    let args: HashMap<String, Option<String>> = parse_args(cmd_parts);
-    let parents: bool = args.contains_key("p");
+fn confirm_removal(path: &str) -> bool {
+    println!("Are you sure you want to remove {}? (y/N)", path);
+    let mut input: String = String::new();
+    io::stdin().read_line(&mut input).unwrap();
+    input.trim().to_lowercase() == "y"
+}
 
-    if cmd_parts.len() < 2 {
+fn handle_mkdir(cmd_parts: &[String]) -> String {
+    let (main_args, flag_args) = parse_args(cmd_parts);
+    let parents: bool = flag_args.contains_key("p");
+
+    if main_args.len() < 1 {
         return "Usage: mkdir [-p] <directory_path>".to_owned();
     }
 
-    let dir_path: &String = &cmd_parts[cmd_parts.len() - 1];
+    let dir_path: &String = &main_args[main_args.len() - 1];
 
     if parents {
         match fs::create_dir_all(dir_path) {
@@ -915,16 +1129,16 @@ fn handle_mkdir(cmd_parts: &[String]) -> String {
 }
 
 fn handle_ls(state: &ShellState, cmd_parts: &[String]) -> String {
-    let args: HashMap<String, Option<String>> = parse_args(cmd_parts);
-    let long_format: bool = args.contains_key("l");
-    let show_hidden: bool = args.contains_key("a");
-    let list_dir_itself: bool = args.contains_key("d");
+    let (main_args, flag_args) = parse_args(cmd_parts);
+    let long_format: bool = flag_args.contains_key("l");
+    let show_hidden: bool = flag_args.contains_key("a");
+    let list_dir_itself: bool = flag_args.contains_key("d");
 
-    let path: PathBuf = if cmd_parts.len() > 1 && !cmd_parts[1].starts_with('-') {
-        if cmd_parts[1].starts_with('/') {
-            PathBuf::from(&cmd_parts[1])
+    let path: PathBuf = if main_args.len() > 0 {
+        if main_args[0].starts_with('/') {
+            PathBuf::from(&main_args[0])
         } else {
-            PathBuf::from(&state.cwd).join(&cmd_parts[1])
+            PathBuf::from(&state.cwd).join(&main_args[0])
         }
     } else {
         PathBuf::from(&state.cwd)
@@ -943,7 +1157,7 @@ fn list_directory(path: &Path, long_format: bool, show_hidden: bool) -> String {
     match fs::read_dir(path) {
         Ok(entries) => {
             let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-            entries.sort_by_key(|e| e.file_name());
+            entries.sort_by_key(|e: &fs::DirEntry| e.file_name());
 
             for entry in entries {
                 let file_name: std::ffi::OsString = entry.file_name();
@@ -958,14 +1172,34 @@ fn list_directory(path: &Path, long_format: bool, show_hidden: bool) -> String {
                     if let Ok(metadata) = entry.metadata() {
                         out.push_str(&format_long_listing(&entry_path, &metadata));
                     } else {
-                        // Handle the error case, e.g., by skipping this entry
                         eprintln!("Failed to get metadata for {:?}", entry_path);
                     }
                 } else {
-                    out.push_str(&format!("{}\n", file_name_str));
+                    let file_t: fs::FileType = entry.file_type().unwrap();
+                    
+                    let styled_output = if file_t.is_dir() {
+                        Style::new().fg(Color::Blue).bold().apply_to(&file_name_str)
+                    } else if file_t.is_file() {
+                        let extension: &str = file_name_str.split('.').last().unwrap_or("");
+                        match extension {
+                            "sh" | "bash" | "zsh" | "fish" => Style::new().fg(Color::Green).apply_to(&file_name_str),
+                            "tar" | "tgz" | "gz" | "zip" | "rar" | "7z" => Style::new().fg(Color::Red).apply_to(&file_name_str),
+                            "jpg" | "jpeg" | "gif" | "png" | "bmp" => Style::new().fg(Color::Magenta).apply_to(&file_name_str),
+                            "mp3" | "wav" | "flac" => Style::new().fg(Color::Cyan).apply_to(&file_name_str),
+                            "pdf" | "epub" | "mobi" => Style::new().fg(Color::Yellow).apply_to(&file_name_str),
+                            "exe" | "dll" => Style::new().fg(Color::Green).bold().apply_to(&file_name_str),
+                            _ => Style::new().apply_to(&file_name_str),
+                        }
+                    } else if file_t.is_symlink() {
+                        Style::new().fg(Color::Cyan).apply_to(&file_name_str)
+                    } else {
+                        Style::new().apply_to(&file_name_str)
+                    };
+                    
+                    out.push_str(&format!("{} ", styled_output));
                 }
             }
-
+            out = out.trim().to_owned();
             if out.is_empty() {
                 "Directory is empty".to_owned()
             } else {
@@ -980,53 +1214,128 @@ fn list_directory(path: &Path, long_format: bool, show_hidden: bool) -> String {
 
 fn list_directory_entry(path: &Path, long_format: bool) -> String {
     if long_format {
-        let metadata: fs::Metadata = fs::metadata(path).unwrap();
+        let metadata = fs::metadata(path).unwrap();
         format_long_listing(path, &metadata)
     } else {
-        format!("{}\n", path.display())
+        let styled_output = style_path(path);
+        format!("{}\n", styled_output)
     }
 }
 
 fn format_long_listing(path: &Path, metadata: &fs::Metadata) -> String {
-    let file_type: &str = if metadata.is_dir() { "d" } else { "-" };
-    let permissions: fs::Permissions = metadata.permissions();
-    let mode: u32 = permissions.mode();
+    let file_type: &str = get_file_type(metadata);
+    let permissions: String = format_permissions(metadata.mode());
+    let links: u64 = metadata.nlink();
+    let owner: String = get_owner(metadata.uid());
+    let group: String = get_group(metadata.gid());
     let size: u64 = metadata.len();
     let modified: SystemTime = metadata.modified().unwrap();
     let modified_str: String = format_time(modified);
+    let name: Cow<'_, str> = path.file_name().unwrap_or_default().to_string_lossy();
+    let styled_name: console::StyledObject<String> = style_path(path);
+
+    let symlink_target: String = if metadata.file_type().is_symlink() {
+        fs::read_link(path)
+            .map(|target| format!(" -> {}", target.to_string_lossy()))
+            .unwrap_or_else(|_| String::new())
+    } else {
+        String::new()
+    };
 
     format!(
-        "{}{} {:>8} {:>8} {}\n",
+        "{}{} {:>4} {:>8} {:>8} {:>8} {} {}{}\n",
         file_type,
-        format_permissions(mode),
+        permissions,
+        links,
+        owner,
+        group,
         size,
         modified_str,
-        path.file_name().unwrap_or_default().to_string_lossy()
+        styled_name,
+        symlink_target
     )
+}
+
+fn get_file_type(metadata: &fs::Metadata) -> &'static str {
+    if metadata.is_dir() {
+        "d"
+    } else if metadata.file_type().is_symlink() {
+        "l"
+    } else {
+        "-"
+    }
+}
+
+fn format_permissions(mode: u32) -> String {
+    let user = format_permission_triple(mode >> 6);
+    let group = format_permission_triple(mode >> 3);
+    let other = format_permission_triple(mode);
+    format!("{}{}{}", user, group, other)
+}
+
+fn format_permission_triple(mode: u32) -> String {
+    let read = if mode & 0b100 != 0 { "r" } else { "-" };
+    let write = if mode & 0b010 != 0 { "w" } else { "-" };
+    let execute = if mode & 0b001 != 0 { "x" } else { "-" };
+    format!("{}{}{}", read, write, execute)
 }
 
 fn format_time(time: SystemTime) -> String {
     let datetime: DateTime<Local> = time.into();
     datetime.format("%b %d %H:%M").to_string()
 }
-fn format_permissions(mode: u32) -> String {
-    let user: String = format_permission_triple(mode >> 6);
-    let group: String = format_permission_triple(mode >> 3);
-    let other: String = format_permission_triple(mode);
-    format!("{}{}{}", user, group, other)
+
+fn get_owner(uid: u32) -> String {
+    // Get the username
+    unsafe {
+        let passwd = getpwuid(uid);
+        if passwd == ptr::null_mut() {
+            return format!("{}", uid);
+        }
+        
+        let username = CStr::from_ptr((*passwd).pw_name);
+        username.to_string_lossy().into_owned()
+    }
 }
 
-fn format_permission_triple(mode: u32) -> String {
-    let read: &str = if mode & 0b100 != 0 { "r" } else { "-" };
-    let write: &str = if mode & 0b010 != 0 { "w" } else { "-" };
-    let execute: &str = if mode & 0b001 != 0 { "x" } else { "-" };
-    format!("{}{}{}", read, write, execute)
+fn get_group(gid: u32) -> String {
+    // Get the group
+    unsafe {
+        let group = getgrgid(gid);
+        if group == ptr::null_mut() {
+            return format!("{}", gid);
+        }
+        
+        let groupname = CStr::from_ptr((*group).gr_name);
+        groupname.to_string_lossy().into_owned()
+    }
+}
+
+
+fn style_path(path: &Path) -> console::StyledObject<String> {
+    let name: Cow<'_, str> = path.file_name().unwrap_or_default().to_string_lossy();
+    let metadata: fs::Metadata = fs::metadata(path).unwrap();
+    if metadata.file_type().is_symlink() {
+        Style::new().fg(Color::Black).apply_to(name.to_string())
+    } else if metadata.is_dir() {
+        Style::new().fg(Color::Blue).bold().apply_to(name.to_string())
+    } else if metadata.permissions().mode() & 0o111 != 0 {
+        Style::new().fg(Color::Green).apply_to(name.to_string())
+    } else {
+        let extension = name.split('.').last().unwrap_or("");
+        match extension {
+            "tar" | "tgz" | "gz" | "zip" | "rar" | "7z" => Style::new().fg(Color::Red).apply_to(name.to_string()),
+            "jpg" | "jpeg" | "gif" | "png" | "bmp" => Style::new().fg(Color::Magenta).apply_to(name.to_string()),
+            "mp3" | "wav" | "flac" => Style::new().fg(Color::Cyan).apply_to(name.to_string()),
+            "pdf" | "epub" | "mobi" => Style::new().fg(Color::Yellow).apply_to(name.to_string()),
+            _ => Style::new().apply_to(name.to_string()),
+        }
+    }
 }
 
 fn handle_cd(state: &mut ShellState, cmd_parts: &[String]) -> String {
     match cmd_parts.len() {
         1 => {
-            // Change to home directory when no argument is provided
             "No directory passed. Usage: cd <directory>".to_owned()
         }
         2 => {
@@ -1090,7 +1399,7 @@ async fn handle_nash_args(conf: &mut Config, args: Vec<String>) {
 
     // Handle other command-line arguments
     if args.contains(&"--version".to_string()) {
-        println!("v0.0.9.5.4");
+        println!("v0.0.9.6");
         return;
     }
 

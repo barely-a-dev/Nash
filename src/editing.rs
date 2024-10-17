@@ -8,10 +8,12 @@ use std::fs::DirEntry;
 use std::io;
 use std::borrow::Cow;
 use std::env;
+use console::Style;
 
 pub struct AutoCompleter {
     current_dir: PathBuf,
     commands: Vec<String>,
+    home_dir: PathBuf,
 }
 
 impl AutoCompleter {
@@ -29,6 +31,10 @@ impl AutoCompleter {
             "alias".to_string(),
             "rmalias".to_string(),
             "help".to_string(),
+            "set".to_string(),
+            "unset".to_string(),
+            "rconf".to_string(),
+            "reset".to_string()
             // More built-in commands here
         ];
 
@@ -52,11 +58,27 @@ impl AutoCompleter {
         commands.sort();
         commands.dedup();
 
-        AutoCompleter { current_dir, commands }
+        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+
+        AutoCompleter { current_dir, commands, home_dir }
     }
 
     pub fn update_current_dir(&mut self, new_dir: PathBuf) {
         self.current_dir = new_dir;
+    }
+
+    fn expand_tilde(&self, path: &str) -> PathBuf {
+        if path.starts_with('~') {
+            if path == "~" {
+                self.home_dir.clone()
+            } else if path.starts_with("~/") {
+                self.home_dir.join(&path[2..])
+            } else {
+                PathBuf::from(path)
+            }
+        } else {
+            PathBuf::from(path)
+        }
     }
 }
 
@@ -80,10 +102,11 @@ impl Completer for AutoCompleter {
         }
 
         // File/directory completion
-        let path: PathBuf = if word.starts_with('/') {
-            PathBuf::from(word)
+        let path = self.expand_tilde(word);
+        let path = if path.is_absolute() {
+            path
         } else {
-            self.current_dir.join(word)
+            self.current_dir.join(path)
         };
 
         let (dir, prefix) = if path.is_dir() {
@@ -122,32 +145,67 @@ fn extract_word(line: &str, pos: usize) -> (usize, &str) {
     (start, &line[start..pos])
 }
 
-pub struct LineHighlighter;
+pub struct LineHighlighter {
+    prompt_style: Style,
+    command_style: Style,
+    arg_style: Style,
+    path_style: Style,
+}
 
 impl LineHighlighter {
     pub fn new() -> Self {
-        LineHighlighter
+        LineHighlighter {
+            prompt_style: Style::new().cyan(),
+            command_style: Style::new().green().bold(),
+            arg_style: Style::new().yellow(),
+            path_style: Style::new().blue().underlined(),
+        }
+    }
+
+    fn highlight_command_line(&self, line: &str) -> String {
+        let mut result = String::new();
+        let parts: Vec<&str> = line.split_whitespace().collect();
+
+        if let Some((first, rest)) = parts.split_first() {
+            // Highlight the command
+            result.push_str(&self.command_style.apply_to(first).to_string());
+
+            // Highlight arguments and paths
+            for part in rest {
+                result.push(' ');
+                if part.starts_with('-') {
+                    result.push_str(&self.arg_style.apply_to(part).to_string());
+                } else if part.contains('/') || part.starts_with('~') {
+                    result.push_str(&self.path_style.apply_to(part).to_string());
+                } else {
+                    result.push_str(part);
+                }
+            }
+        } else {
+            result.push_str(line);
+        }
+
+        result
     }
 }
 
 impl Highlighter for LineHighlighter {
     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, prompt: &'p str, _default: bool) -> Cow<'b, str> {
-        Cow::Borrowed(prompt)
+        Cow::Owned(self.prompt_style.apply_to(prompt).to_string())
     }
 
     fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
-        Cow::Borrowed(hint)
+        Cow::Owned(Style::new().dim().italic().apply_to(hint).to_string())
     }
 
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        Cow::Borrowed(line)
+        Cow::Owned(self.highlight_command_line(line))
     }
 
     fn highlight_char(&self, _line: &str, _pos: usize) -> bool {
-        false
+        true
     }
 }
-
 pub struct CommandHinter;
 
 impl CommandHinter {
@@ -181,7 +239,9 @@ impl Hinter for CommandHinter {
             "summon" => Some(" [-w] <command>".to_string()),
             "alias" => Some(" <identifier>[=<command>]".to_string()),
             "rmalias" => Some(" <identifier>".to_string()),
-            "help" => Some("".to_string()),
+            "set" => Some(" <<<option> <value>>/<flag>>".to_string()),
+            "unset" => Some(" <option> <temp(bool)".to_string()),
+            "rconf" => Some(" <option> [temp(bool)]".to_string()),
             _ => None,
         }
     }

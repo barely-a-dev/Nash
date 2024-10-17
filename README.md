@@ -95,6 +95,10 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
   - -w: Wait for process exit before continuing
 - alias <identifier>[=original]: Create an alias for a command
 - rmalias <identifier>: Remove an alias for a command
+- set <<<option> <value>>/<flag>>: Set a config rule to true or value
+- unset <option> <temp(bool)>: Unset a config rule (unimplemented)
+- reset: Reset the application, erase if delete_on_reset rule is true
+- rconf <option> [temp(bool)]: Read the value of a config rule (unimplemented)
 - help: Display a help menu
 
 ### Special Features
@@ -106,7 +110,7 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
 
 ## Development Status
 
-Nash is currently in early development (v0.0.9.5.4). While it's functional for basic use, many features are still being implemented or improved.
+Nash is currently in early development (v0.0.9.6). While it's functional for basic use, many features are still being implemented or improved.
 
 ## Contributing
 
