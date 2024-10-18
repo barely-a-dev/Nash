@@ -1,6 +1,6 @@
 // Important TODOs: Fix updating, which evidently never worked.
-// MAJOR TODOs: export for env vars, CONFIG, set/unset for setting temp config (easy?), quotes and escaping ('', "", \), wildcards/regex (*, ?, [])
-// Absolutely HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables).
+// MAJOR TODOs: export for env vars, wildcards/regex (*, ?, []), job control, prompt customization with PS1, PS2, etc.
+// HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables).
 pub mod editing;
 pub mod config;
 pub mod arguments;
@@ -11,12 +11,13 @@ pub mod helpers;
 pub mod command_parsing;
 pub mod update;
 
-use crate::editing::*;
-use crate::config::*;
-use crate::evaluation::*;
-use crate::globals::*;
-use crate::helpers::*;
-use crate::update::*;
+use crate::editing::{CommandHinter, AutoCompleter, LineHighlighter};
+use crate::config::Config;
+use crate::evaluation::eval;
+use crate::globals::ShellState;
+use crate::helpers::get_history_file_path;
+use crate::update::{update_nash, get_local_version, get_remote_version};
+use arguments::parse_arg_vec;
 use rustyline::{
     completion::{Completer, Pair},
     error::ReadlineError,
@@ -171,10 +172,14 @@ fn repl(state: &mut ShellState, conf: &mut Config) {
 
 // TODO: use parse_args() in handling nash's arguments.
 async fn handle_nash_args(conf: &mut Config, args: Vec<String>) {
+    let (main_args, flag_args) = parse_arg_vec(&args);
+    let update: bool = flag_args.contains_key("update") || flag_args.contains_key("u");
+    let force: bool = flag_args.contains_key("force") || flag_args.contains_key("f");
+    let version: bool = flag_args.contains_key("version") || flag_args.contains_key("v");
     // Check if arg 1 is a path, if so, run it as a series of commands (like bash's .sh running impl) (scripting)
     // PLACEHOLDER, WILL NOT WORK LIKE INTENDED!!
-    if args.len() > 1 && Path::new(&args[1]).exists() {
-        let script_path: &String = &args[1];
+    if main_args.len() > 0 && Path::new(&main_args[0]).exists() {
+        let script_path: &String = &main_args[0];
         match fs::read_to_string(script_path) {
             Ok(contents) => {
                 let mut state: ShellState = ShellState {
@@ -195,17 +200,14 @@ async fn handle_nash_args(conf: &mut Config, args: Vec<String>) {
         return;
     }
 
-    let force_update: bool =
-        args.contains(&"-f".to_string()) || args.contains(&"--force".to_string());
-
     // Handle other command-line arguments
-    if args.contains(&"--version".to_string()) {
-        println!("v0.0.9.6");
+    if version {
+        println!("v0.0.9.6.2");
         return;
     }
 
-    if args.contains(&"--update".to_string()) {
-        if !force_update {
+    if update {
+        if !force {
             println!("Checking for updates...");
 
             // Compare local and remote version
@@ -237,8 +239,8 @@ async fn handle_nash_args(conf: &mut Config, args: Vec<String>) {
 fn print_usage() {
     println!("Usage: nash [OPTION] [SCRIPT]");
     println!("Options:");
-    println!("  --version    Display the current version of Nash");
-    println!("  --update     Check for updates and install if available");
+    println!("  --version/-v    Display the current version of Nash");
+    println!("  --update/-u     Check for updates and install if available");
     println!("  -f, --force  Force the operation (if used with --update, update even if no new version is detected)");
     println!("  <script>     Run the specified script file (heavily discouraged, unstable)");
 }

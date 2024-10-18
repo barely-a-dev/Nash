@@ -44,3 +44,16 @@ pub fn parse_args(args: &[String]) -> (Vec<String>, HashMap<String, Option<Strin
 
     (non_flag_args, parsed_args)
 }
+
+// This isn't pointless at all
+pub fn parse_arg_vec(args: &Vec<String>) -> (Vec<String>, HashMap<String, Option<String>>)
+{
+    let arg_array: &mut [String] = &mut [];
+    let mut i: usize = 0;
+    for arg in args
+    {
+        arg_array[i] = arg.to_owned();
+        i += 1;
+    }
+    return parse_args(&arg_array);
+}

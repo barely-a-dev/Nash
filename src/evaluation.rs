@@ -50,7 +50,7 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, cmd: String, internal: bo
             "mkdir" => handle_mkdir(&expanded_cmd_parts),
             "ls" => handle_ls(state, &expanded_cmd_parts),
             "cd" => handle_cd(state, &expanded_cmd_parts),
-            "history" => handle_history(),
+            "history" => handle_history(&expanded_cmd_parts),
             "exit" => {
                 println!("Exiting...");
                 process::exit(0);

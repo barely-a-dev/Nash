@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader, Write};
-use crate::get_nash_dir;
+use crate::globals::get_nash_dir;
 use std::fs::File;
 use std::collections::HashMap;
 use std::path::PathBuf;

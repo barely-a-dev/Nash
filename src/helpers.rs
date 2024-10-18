@@ -1,7 +1,7 @@
 
 use crate::globals::*;
-use console::{Style, Color};
-use std::{collections::HashMap, ptr, path::PathBuf, io, time::SystemTime, ffi::{CStr, OsStr}, fs, os::unix::fs::{PermissionsExt, MetadataExt}, borrow::Cow, path::Path};
+use console::{Color, Style};
+use std::{borrow::Cow, collections::HashMap, ffi::{CStr, OsStr}, fs, io, os::unix::fs::{MetadataExt, PermissionsExt}, path::{Path, PathBuf}, ptr, time::SystemTime};
 use libc::{getgrgid, getpwuid};
 use chrono::{Local, DateTime};
 
@@ -115,10 +115,14 @@ pub fn confirm_removal(path: &str) -> bool {
     input.trim().to_lowercase() == "y"
 }
 
-pub fn list_directory(path: &Path, long_format: bool, show_hidden: bool) -> String {
-    let mut out = String::new();
+pub fn list_directory(path: &Path, long_format: bool, show_hidden: bool, style: bool) -> String {
+    let mut out: String = String::new();
     if path.is_file() {
-        let styled_output = style_path(path);
+        if style
+        {
+            return format!("{}", path.file_name().unwrap_or_default().to_str().unwrap_or("").to_string());
+        }
+        let styled_output: console::StyledObject<String> = style_path(path);
         return format!("{}", styled_output);
     }
 
@@ -138,13 +142,17 @@ pub fn list_directory(path: &Path, long_format: bool, show_hidden: bool) -> Stri
                 if long_format {
                     let entry_path: PathBuf = entry.path();
                     if let Ok(metadata) = entry.metadata() {
-                        out.push_str(&format_long_listing(&entry_path, &metadata));
+                        out.push_str(&format_long_listing(&entry_path, &metadata, style));
                     } else {
                         eprintln!("Failed to get metadata for {:?}", entry_path);
                     }
                 } else {
                     let styled_output: console::StyledObject<String> = style_path(&entry.path());
-                    out.push_str(&format!("{} ", styled_output));
+                    if style {
+                        out.push_str(&format!("{} ", styled_output));
+                    } else {
+                        out.push_str(&format!("{} ", entry.path().file_name().unwrap_or_default().to_str().unwrap_or("").to_string()));
+                    }
                 }
             }
             out = out.trim().to_owned();
@@ -160,39 +168,22 @@ pub fn list_directory(path: &Path, long_format: bool, show_hidden: bool) -> Stri
     }
 }
 
-pub fn color_filetype<'a>(file_t: fs::FileType, file_name_str: &'a Cow<'a, str>) ->  console::StyledObject<&'a Cow<'a, str>>
-{
-    return if file_t.is_dir() {
-        Style::new().fg(Color::Blue).bold().apply_to(&file_name_str)
-    } else if file_t.is_file() {
-        let extension: &str = file_name_str.split('.').last().unwrap_or("");
-        match extension {
-            "sh" | "bash" | "zsh" | "fish" => Style::new().fg(Color::Green).apply_to(&file_name_str),
-            "tar" | "tgz" | "gz" | "zip" | "rar" | "7z" => Style::new().fg(Color::Red).apply_to(&file_name_str),
-            "jpg" | "jpeg" | "gif" | "png" | "bmp" => Style::new().fg(Color::Magenta).apply_to(&file_name_str),
-            "mp3" | "wav" | "flac" => Style::new().fg(Color::Cyan).apply_to(&file_name_str),
-            "pdf" | "epub" | "mobi" => Style::new().fg(Color::Yellow).apply_to(&file_name_str),
-            "exe" | "dll" => Style::new().fg(Color::Green).bold().apply_to(&file_name_str),
-            _ => Style::new().apply_to(&file_name_str),
-        }
-    } else if file_t.is_symlink() {
-        Style::new().fg(Color::Cyan).apply_to(&file_name_str)
-    } else {
-        Style::new().apply_to(&file_name_str)
-    };
-}
-
-pub fn list_directory_entry(path: &Path, long_format: bool) -> String {
+pub fn list_directory_entry(path: &Path, long_format: bool, style: bool) -> String {
     if long_format {
-        let metadata = fs::metadata(path).unwrap();
-        format_long_listing(path, &metadata)
+        let metadata: fs::Metadata = fs::metadata(path).unwrap();
+        format_long_listing(path, &metadata, style)
     } else {
-        let styled_output = style_path(path);
-        format!("{}\n", styled_output)
+        let styled_output: console::StyledObject<String> = style_path(path);
+        if style {
+            format!("{}\n", styled_output)
+        }
+        else {
+            format!("{}\n", path.file_name().unwrap_or_default().to_str().unwrap_or("").to_string())
+        }
     }
 }
 
-pub fn format_long_listing(path: &Path, metadata: &fs::Metadata) -> String {
+pub fn format_long_listing(path: &Path, metadata: &fs::Metadata, style: bool) -> String {
     let file_type: &str = get_file_type(metadata);
     let permissions: String = format_permissions(metadata.mode());
     let links: u64 = metadata.nlink();
@@ -210,19 +201,33 @@ pub fn format_long_listing(path: &Path, metadata: &fs::Metadata) -> String {
     } else {
         String::new()
     };
-
-    format!(
-        "{}{} {:>4} {:>8} {:>8} {:>8} {} {}{}\n",
-        file_type,
-        permissions,
-        links,
-        owner,
-        group,
-        size,
-        modified_str,
-        styled_name,
-        symlink_target
-    )
+    if style {
+        format!(
+            "{}{} {:>4} {:>8} {:>8} {:>8} {} {}{}\n",
+            file_type,
+            permissions,
+            links,
+            owner,
+            group,
+            size,
+            modified_str,
+            styled_name,
+            symlink_target
+        )
+    } else {
+        format!(
+            "{}{} {:>4} {:>8} {:>8} {:>8} {} {}{}\n",
+            file_type,
+            permissions,
+            links,
+            owner,
+            group,
+            size,
+            modified_str,
+            path.file_name().unwrap_or_default().to_str().unwrap_or("").to_string(),
+            symlink_target
+        )
+    }
 }
 
 pub fn get_file_type(metadata: &fs::Metadata) -> &'static str {
@@ -257,12 +262,12 @@ pub fn format_time(time: SystemTime) -> String {
 pub fn get_owner(uid: u32) -> String {
     // Get the username
     unsafe {
-        let passwd = getpwuid(uid);
+        let passwd: *mut libc::passwd = getpwuid(uid);
         if passwd == ptr::null_mut() {
             return format!("{}", uid);
         }
         
-        let username = CStr::from_ptr((*passwd).pw_name);
+        let username: &CStr = CStr::from_ptr((*passwd).pw_name);
         username.to_string_lossy().into_owned()
     }
 }
@@ -270,12 +275,12 @@ pub fn get_owner(uid: u32) -> String {
 pub fn get_group(gid: u32) -> String {
     // Get the group
     unsafe {
-        let group = getgrgid(gid);
+        let group: *mut libc::group = getgrgid(gid);
         if group == ptr::null_mut() {
             return format!("{}", gid);
         }
         
-        let groupname = CStr::from_ptr((*group).gr_name);
+        let groupname: &CStr = CStr::from_ptr((*group).gr_name);
         groupname.to_string_lossy().into_owned()
     }
 }
@@ -292,7 +297,7 @@ pub fn style_path(path: &Path) -> console::StyledObject<String> {
             _ => Style::new().fg(Color::Blue).bold().apply_to(name.to_string())
         }
     } else if metadata.permissions().mode() & 0o111 != 0 {
-        Style::new().fg(Color::Green).apply_to(name.to_string())
+        Style::new().fg(Color::Green).bold().apply_to(name.to_string())
     } else {
         let extension = name.split('.').last().unwrap_or("");
         match extension {
@@ -304,6 +309,7 @@ pub fn style_path(path: &Path) -> console::StyledObject<String> {
         }
     }
 }
+
 pub fn copy_dir_all(src: &Path, dst: &Path, force: bool) -> io::Result<()> {
     if !dst.exists() {
         fs::create_dir_all(dst)?;

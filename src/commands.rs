@@ -50,12 +50,12 @@ pub fn reset(conf: &mut Config, state: &mut ShellState, nash_dir: PathBuf) -> St
 
 pub fn show_help() -> String {
     "cd <directory>: Change the current directory\n\
-     ls [directory] [-l] [-a] [-d]: List contents of a directory\n\
+     ls [directory] [-l] [-a] [-d] [--color|c]: List contents of a directory\n\
      cp [-r|R] [-f] <source> <destination>: Copy files or directories\n\
      mv [-f] <source> <destination>: Move files or directories\n\
      rm [-f] <file>: Remove a file\n\
      mkdir [-p] <directory>: Create a new directory\n\
-     history: Display command history\n\
+     history [--size|s] [--clear|c]: Display command history\n\
      exit: Exit the shell\n\
      summon [-w] <command>: Open an *external* command in a new terminal window\n\
      alias <identifier>[=original]: Create an alias for a command\n\
@@ -188,16 +188,34 @@ pub fn handle_summon(cmd_parts: &[String]) -> String {
         }
 }
 
-pub fn handle_history() -> String {
-    let history_file: PathBuf = get_history_file_path();
-    match fs::read_to_string(history_file) {
-        Ok(contents) => {
-            for (i, line) in contents.lines().enumerate() {
-                println!("{}: {}", i + 1, line);
+pub fn handle_history(cmd: &[String]) -> String {
+    let (_, flag_args) = parse_args(cmd);
+    let size: bool = flag_args.contains_key("size") || flag_args.contains_key("s");
+    let clear: bool = flag_args.contains_key("clear") || flag_args.contains_key("c");
+    if !size && !clear {
+        let history_file: PathBuf = get_history_file_path();
+        match fs::read_to_string(history_file) {
+            Ok(contents) => {
+                for (i, line) in contents.lines().enumerate() {
+                    println!("{}: {}", i + 1, line);
+                }
+                NO_RESULT.to_owned()
             }
-            NO_RESULT.to_owned()
+            Err(e) => format!("Failed to read history: {}", e),
         }
-        Err(e) => format!("Failed to read history: {}", e),
+    } else {
+        let mut out: String = String::new();
+        if size {
+            out.push_str(&format!("History file size: {}\n", get_history_file_path().metadata().unwrap().len()));
+        }
+        if clear {
+            match File::create(get_history_file_path())
+            {
+                Ok(_) => out.push_str("Successfully cleared history\n"),
+                Err(e) => out.push_str(&format!("Could not clear history. Recieved error: {}\n", e))
+            };
+        }
+        return out;
     }
 }
 
@@ -353,6 +371,7 @@ pub fn handle_ls(state: &ShellState, cmd_parts: &[String]) -> String {
     let long_format: bool = flag_args.contains_key("l");
     let show_hidden: bool = flag_args.contains_key("a");
     let list_dir_itself: bool = flag_args.contains_key("d");
+    let style: bool = flag_args.contains_key("color") || flag_args.contains_key("c");
 
     let path: PathBuf = if main_args.len() > 0 {
         if main_args[0].starts_with('/') {
@@ -365,10 +384,10 @@ pub fn handle_ls(state: &ShellState, cmd_parts: &[String]) -> String {
     };
 
     if list_dir_itself {
-        return list_directory_entry(&path, long_format);
+        return list_directory_entry(&path, long_format, style);
     }
 
-    list_directory(&path, long_format, show_hidden)
+    list_directory(&path, long_format, show_hidden, style)
 }
 
 pub fn handle_cd(state: &mut ShellState, cmd_parts: &[String]) -> String {

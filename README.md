@@ -76,7 +76,7 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
 ### Built-in Commands
 
 - cd <directory>: Change the current directory
-- ls [directory] [-l] [-a] [-d]: List contents of a directory
+- ls [directory] [-l] [-a] [-d] [-c|color]: List contents of a directory
   - -l: Use long listing format
   - -a: Show hidden files
   - -d: List directories themselves, not their contents
@@ -89,7 +89,7 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
   - -f: Force removal without prompt
 - mkdir [-p] <directory>: Create a new directory
   - -p: Create parent directories as needed
-- history: Display command history
+- history [--size|s] [--clear|c]: Display command history
 - exit: Exit the shell
 - summon [-w] <command>: Open an *external* command in a new terminal window
   - -w: Wait for process exit before continuing
@@ -110,7 +110,7 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
 
 ## Development Status
 
-Nash is currently in early development (v0.0.9.6). While it's functional for basic use, many features are still being implemented or improved.
+Nash is currently in early development (v0.0.9.6.2). While it's functional for basic use, many features are still being implemented or improved.
 
 ## Contributing
 
