@@ -116,17 +116,16 @@ pub fn confirm_removal(path: &str) -> bool {
 }
 
 pub fn list_directory(path: &Path, long_format: bool, show_hidden: bool) -> String {
-    let mut out: String = String::new();
-    if path.is_file()
-    {
-        let md: fs::Metadata = fs::metadata(path).unwrap_or(fs::metadata("/etc/fstab").unwrap());
-        return format!("{}", color_filetype(md.file_type(), &path.to_string_lossy()));
+    let mut out = String::new();
+    if path.is_file() {
+        let styled_output = style_path(path);
+        return format!("{}", styled_output);
     }
 
     match fs::read_dir(path) {
         Ok(entries) => {
             let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-            entries.sort_by_key(|e: &fs::DirEntry| e.file_name());
+            entries.sort_by_key(|e| e.file_name());
 
             for entry in entries {
                 let file_name: std::ffi::OsString = entry.file_name();
@@ -144,10 +143,7 @@ pub fn list_directory(path: &Path, long_format: bool, show_hidden: bool) -> Stri
                         eprintln!("Failed to get metadata for {:?}", entry_path);
                     }
                 } else {
-                    let file_t: fs::FileType = entry.file_type().unwrap();
-                    
-                    let styled_output: console::StyledObject<&_> = color_filetype(file_t, &file_name_str);
-                    
+                    let styled_output: console::StyledObject<String> = style_path(&entry.path());
                     out.push_str(&format!("{} ", styled_output));
                 }
             }
@@ -284,14 +280,17 @@ pub fn get_group(gid: u32) -> String {
     }
 }
 
-
 pub fn style_path(path: &Path) -> console::StyledObject<String> {
     let name: Cow<'_, str> = path.file_name().unwrap_or_default().to_string_lossy();
-    let metadata: fs::Metadata = fs::metadata(path).unwrap();
+    let metadata: fs::Metadata = fs::symlink_metadata(path).unwrap();
+    
     if metadata.file_type().is_symlink() {
-        Style::new().fg(Color::Black).apply_to(name.to_string())
+        Style::new().fg(Color::Cyan).bold().apply_to(name.to_string())
     } else if metadata.is_dir() {
-        Style::new().fg(Color::Blue).bold().apply_to(name.to_string())
+        match path.to_str().unwrap() {
+            "/tmp" => Style::new().fg(Color::Black).bg(Color::Green).apply_to(name.to_string()),
+            _ => Style::new().fg(Color::Blue).bold().apply_to(name.to_string())
+        }
     } else if metadata.permissions().mode() & 0o111 != 0 {
         Style::new().fg(Color::Green).apply_to(name.to_string())
     } else {
