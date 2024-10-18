@@ -44,11 +44,6 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, cmd: String, internal: bo
     else {
         match expanded_cmd_parts[0].as_str() {
             cmd if cmd.starts_with('.') => "This path should be unreachable.".to_owned(),
-            "cp" => handle_cp(&expanded_cmd_parts),
-            "mv" => handle_mv(&expanded_cmd_parts),
-            "rm" => handle_rm(&expanded_cmd_parts),
-            "mkdir" => handle_mkdir(&expanded_cmd_parts),
-            "ls" => handle_ls(state, &expanded_cmd_parts),
             "cd" => handle_cd(state, &expanded_cmd_parts),
             "history" => handle_history(&expanded_cmd_parts),
             "exit" => {

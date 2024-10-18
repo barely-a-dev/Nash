@@ -16,9 +16,7 @@ rustyline-derive = "0.7.0"
 dirs = "4.0.0"
 git2 = "0.19.0"
 reqwest = { version = "0.12.8", features = ["json"] }
-chrono = "0.4.38"
 console = "0.15.0"
-libc = "0.2"
 
 [profile.release]
 lto = true

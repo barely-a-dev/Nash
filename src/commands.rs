@@ -1,6 +1,6 @@
 use crate::globals::*;
 use crate::helpers::*;
-use std::{path::{PathBuf, Path}, fs::{self, remove_file, File}, io::Error, collections::HashMap, process::{self, Stdio, Command, exit}};
+use std::{path::PathBuf, fs::{self, remove_file, File}, io::Error, collections::HashMap, process::{self, Stdio, Command, exit}};
 use crate::arguments::*;
 use crate::config::*;
 
@@ -267,127 +267,6 @@ pub fn handle_remove_alias(cmd_parts: &[String]) -> String {
     } else {
         format!("Alias '{}' not found.", alias_name)
     }
-}
-
-pub fn handle_cp(cmd_parts: &[String]) -> String {
-    let (main_args, flag_args) = parse_args(cmd_parts);
-    let recursive: bool = flag_args.contains_key("r") || flag_args.contains_key("R");
-    let force: bool = flag_args.contains_key("f");
-
-    if main_args.len() < 2 {
-        println!("{}, {}, {:#?}, {:#?}", recursive, force, main_args, flag_args);
-        return "Usage: cp [-r|R] [-f] <source> <destination>".to_owned();
-    }
-
-    let src: &String = &main_args[0];
-    let dst: &String = &main_args[1];
-
-    match copy_item(src, dst, recursive, force) {
-        Ok(_) => "Successfully copied item.".to_owned(),
-        Err(e) => format!("An error occurred: {}, {:#?}, {:#?}", e, main_args, flag_args),
-    }
-}
-
-pub fn handle_mv(cmd_parts: &[String]) -> String {
-    let (main_args, flag_args) = parse_args(cmd_parts);
-    let force: bool = flag_args.contains_key("f");
-
-    if main_args.len() < 2 {
-        return "Usage: mv [-f] <source> <destination>".to_owned();
-    }
-
-    let src: &String = &main_args[main_args.len() - 2];
-    let dst: &String = &main_args[main_args.len() - 1];
-
-    match move_item(src, dst, force) {
-        Ok(_) => "Successfully moved item.".to_owned(),
-        Err(e) => format!("An error occurred: {}, {}, {}", e, src, dst),
-    }
-}
-
-pub fn handle_rm(cmd_parts: &[String]) -> String {
-    let (main_args, flag_args) = parse_args(cmd_parts);
-    let force: bool = flag_args.contains_key("f");
-    let recursive: bool = flag_args.contains_key("r");
-
-    if main_args.len() < 1 {
-        return "Usage: rm [-f] [-r] <file_or_directory>".to_owned();
-    }
-
-    let path_str: &String = &main_args[0];
-    let path: &Path = Path::new(path_str);
-
-    if !path.exists() {
-        return format!("File or directory not found: {}", path_str);
-    }
-
-    let is_dir: bool = path.is_dir();
-
-    if is_dir && !recursive {
-        return format!("Cannot remove '{}': Is a directory. Use -r flag for recursive removal.", path_str);
-    }
-
-    if force || confirm_removal(path_str) {
-        let result: Result<(), Error> = if is_dir {
-            fs::remove_dir_all(path)
-        } else {
-            fs::remove_file(path)
-        };
-
-        match result {
-            Ok(_) => format!("{} removed successfully.", if is_dir { "Directory" } else { "File" }),
-            Err(e) => format!("Error removing {}: {}", if is_dir { "directory" } else { "file" }, e),
-        }
-    } else {
-        "Operation cancelled.".to_owned()
-    }
-}
-
-pub fn handle_mkdir(cmd_parts: &[String]) -> String {
-    let (main_args, flag_args) = parse_args(cmd_parts);
-    let parents: bool = flag_args.contains_key("p");
-
-    if main_args.len() < 1 {
-        return "Usage: mkdir [-p] <directory_path>".to_owned();
-    }
-
-    let dir_path: &String = &main_args[main_args.len() - 1];
-
-    if parents {
-        match fs::create_dir_all(dir_path) {
-            Ok(_) => "Successfully created directory and any necessary parent directories.".to_owned(),
-            Err(e) => format!("An error occurred: {}", e),
-        }
-    } else {
-        match fs::create_dir(dir_path) {
-            Ok(_) => "Successfully created directory.".to_owned(),
-            Err(e) => format!("An error occurred: {}", e),
-        }
-    }
-}
-
-pub fn handle_ls(state: &ShellState, cmd_parts: &[String]) -> String {
-    let (main_args, flag_args) = parse_args(cmd_parts);
-    let long_format: bool = flag_args.contains_key("l");
-    let show_hidden: bool = flag_args.contains_key("a");
-    let list_dir_itself: bool = flag_args.contains_key("d");
-    let style: bool = flag_args.contains_key("color") || flag_args.contains_key("c");
-
-    let path: PathBuf = if main_args.len() > 0 {
-        if main_args[0].starts_with('/') {
-            PathBuf::from(&main_args[0])
-        } else {
-            PathBuf::from(&state.cwd).join(&main_args[0])
-        }
-    } else {
-        PathBuf::from(&state.cwd)
-    };
-
-    if list_dir_itself {
-        return list_directory_entry(&path, long_format, style);
-    }
-
-    list_directory(&path, long_format, show_hidden, style)
 }
 
 pub fn handle_cd(state: &mut ShellState, cmd_parts: &[String]) -> String {

@@ -176,6 +176,7 @@ async fn handle_nash_args(conf: &mut Config, args: Vec<String>) {
     let update: bool = flag_args.contains_key("update") || flag_args.contains_key("u");
     let force: bool = flag_args.contains_key("force") || flag_args.contains_key("f");
     let version: bool = flag_args.contains_key("version") || flag_args.contains_key("v");
+
     // Check if arg 1 is a path, if so, run it as a series of commands (like bash's .sh running impl) (scripting)
     // PLACEHOLDER, WILL NOT WORK LIKE INTENDED!!
     if main_args.len() > 0 && Path::new(&main_args[0]).exists() {
@@ -232,6 +233,7 @@ async fn handle_nash_args(conf: &mut Config, args: Vec<String>) {
         }
         return;
     }
+
     // If no recognized arguments, print usage
     print_usage();
 }
@@ -239,10 +241,10 @@ async fn handle_nash_args(conf: &mut Config, args: Vec<String>) {
 fn print_usage() {
     println!("Usage: nash [OPTION] [SCRIPT]");
     println!("Options:");
-    println!("  --version/-v    Display the current version of Nash");
-    println!("  --update/-u     Check for updates and install if available");
-    println!("  -f, --force  Force the operation (if used with --update, update even if no new version is detected)");
-    println!("  <script>     Run the specified script file (heavily discouraged, unstable)");
+    println!("  --version/-v  Display the current version of Nash");
+    println!("  --update/-u   Check for updates and install if available");
+    println!("  -f, --force   Force the operation (if used with --update, update even if no new version is detected)");
+    println!("  <script>      Run the specified script file (heavily discouraged, unstable)");
 }
 
 // What was I on when I made this function?? It's so useless...

@@ -88,8 +88,8 @@ pub async fn update_nash() {
         }
     }
 
-    println!("{}", handle_summon(&["-w".to_owned(), format!("\'cd /tmp/{} && sudo chmod +x ./copy.sh && sudo ./copy.sh\'", temp_dir.to_string_lossy().to_string())]));
-
+    println!("{}", handle_summon(&["bash".to_owned(), "-c".to_owned(), "\'cd /tmp/{} && sudo chmod +x ./copy.sh && sudo ./copy.sh\'".to_owned()]));
+    
     // Clean up
     fs::remove_dir_all(&temp_dir).expect("Failed to remove temp directory");
 
