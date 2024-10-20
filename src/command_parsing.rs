@@ -1,5 +1,4 @@
 use std::{env, borrow::Cow, path::{Path, PathBuf}};
-use crate::globals::*;
 
 pub fn split_command(cmd: &str) -> Vec<String> {
     let mut result: Vec<String> = Vec::new();
@@ -39,15 +38,15 @@ pub fn split_command(cmd: &str) -> Vec<String> {
     result
 }
 
-pub fn expand(state: &mut ShellState, cmd: &str) -> String {
-    expand_dots(state, &expand_env_vars(&expand_home(cmd).to_string()))
+pub fn expand(cmd: &str) -> String {
+    expand_dots(&expand_env_vars(&expand_home(cmd).to_string()))
 }
 
 pub fn lim_expand(cmd: &str) -> String {
     expand_env_vars(&expand_home(cmd).to_string())
 }
 
-pub fn expand_dots(state: &ShellState, cmd: &str) -> String {
+pub fn expand_dots(cmd: &str) -> String {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     let mut result: Vec<String> = Vec::new();
 
@@ -59,13 +58,13 @@ pub fn expand_dots(state: &ShellState, cmd: &str) -> String {
             for component in path.components() {
                 match component {
                     std::path::Component::CurDir => {
-                        components.push(state.cwd.clone());
+                        components.push(env::current_dir().unwrap_or(PathBuf::from("/")).to_string_lossy().to_string());
                     },
                     std::path::Component::ParentDir => {
                         if !components.is_empty() {
                             components.pop();
                         } else {
-                            let mut parent = PathBuf::from(&state.cwd);
+                            let mut parent: PathBuf = env::current_dir().unwrap_or(PathBuf::from("/"));
                             parent.pop();
                             components.push(parent.to_string_lossy().into_owned());
                         }

@@ -1,14 +1,17 @@
 use crate::globals::*;
 use crate::helpers::*;
+use crate::jobs::JobControl;
+use std::env;
 use std::{path::PathBuf, fs::{self, remove_file, File}, io::Error, collections::HashMap, process::{self, Stdio, Command, exit}};
 use crate::arguments::*;
 use crate::config::*;
+use crate::jobs::JobStatus;
 
-pub fn reset(conf: &mut Config, state: &mut ShellState, nash_dir: PathBuf) -> String
+pub fn reset(conf: &mut Config, nash_dir: PathBuf) -> String
 {
     conf.rules = HashMap::new();
     conf.temp_rules = HashMap::new();
-    state.cwd = "/".to_owned();
+    env::set_current_dir("/").unwrap();
 
     match conf.get_rule("delete_on_reset", true)
     {
@@ -50,11 +53,6 @@ pub fn reset(conf: &mut Config, state: &mut ShellState, nash_dir: PathBuf) -> St
 
 pub fn show_help() -> String {
     "cd <directory>: Change the current directory\n\
-     ls [directory] [-l] [-a] [-d] [--color|c]: List contents of a directory\n\
-     cp [-r|R] [-f] <source> <destination>: Copy files or directories\n\
-     mv [-f] <source> <destination>: Move files or directories\n\
-     rm [-f] <file>: Remove a file\n\
-     mkdir [-p] <directory>: Create a new directory\n\
      history [--size|s] [--clear|c]: Display command history\n\
      exit: Exit the shell\n\
      summon [-w] <command>: Open an *external* command in a new terminal window\n\
@@ -269,7 +267,7 @@ pub fn handle_remove_alias(cmd_parts: &[String]) -> String {
     }
 }
 
-pub fn handle_cd(state: &mut ShellState, cmd_parts: &[String]) -> String {
+pub fn handle_cd(cmd_parts: &[String]) -> String {
     match cmd_parts.len() {
         1 => {
             "No directory passed. Usage: cd <directory>".to_owned()
@@ -278,14 +276,18 @@ pub fn handle_cd(state: &mut ShellState, cmd_parts: &[String]) -> String {
             let new_path: PathBuf = if cmd_parts[1].starts_with('/') {
                 PathBuf::from(&cmd_parts[1])
             } else {
-                PathBuf::from(&state.cwd).join(&cmd_parts[1])
+                env::current_dir().unwrap_or(PathBuf::from("/")).join(&cmd_parts[1])
             };
 
             if new_path.is_dir() {
                 // Canonicalize the path to resolve any ".." or "." components
                 match new_path.canonicalize() {
                     Ok(canonical_path) => {
-                        state.cwd = canonical_path.to_string_lossy().into_owned();
+                        match env::set_current_dir(canonical_path.to_string_lossy().into_owned())
+                        {
+                            Ok(_) => NO_RESULT.to_owned(),
+                            Err(e) => return format!("Error setting cwd: {}", e)
+                        };
                         NO_RESULT.to_owned()
                     }
                     Err(e) => format!("Error resolving path: {}", e),
@@ -296,4 +298,88 @@ pub fn handle_cd(state: &mut ShellState, cmd_parts: &[String]) -> String {
         }
         _ => "Usage: cd [path]".to_owned(),
     }
+}
+
+/// Handle the 'fg' (foreground) command
+pub fn handle_fg(cmd: &[String], job_control: &mut JobControl) -> String {
+    let (main_args, _) = parse_args(cmd);
+    
+    // If no job specified, use current job
+    let job: i32 = if main_args.is_empty() {
+        match job_control.get_current_job() {
+            Some(job) => job.pid,
+            None => return "No current job".to_string(),
+        }
+    } else {
+        // Parse job number/pid from argument
+        match parse_job_specifier(&main_args[0], job_control) {
+            Ok(pid) => pid,
+            Err(e) => return e,
+        }
+    };
+
+    // Attempt to bring job to foreground
+    match job_control.foreground_job(job) {
+        Ok(_) => NO_RESULT.to_string(),
+        Err(e) => format!("Could not bring job to foreground: {}", e),
+    }
+}
+
+/// Handle the 'bg' (background) command
+pub fn handle_bg(cmd: &[String],  job_control: &mut JobControl) -> String {
+    let (main_args, _) = parse_args(cmd);
+    
+    // If no job specified, use current job
+    let job: i32 = if main_args.is_empty() {
+        match job_control.get_current_job() {
+            Some(job) => job.pid,
+            None => return "No current job".to_string(),
+        }
+    } else {
+        // Parse job number/pid from argument
+        match parse_job_specifier(&main_args[0], job_control) {
+            Ok(pid) => pid,
+            Err(e) => return e,
+        }
+    };
+
+    // Attempt to continue job in background
+    match job_control.background_job(job) {
+        Ok(_) => NO_RESULT.to_string(),
+        Err(e) => format!("Could not continue job in background: {}", e),
+    }
+}
+
+/// Handle the 'jobs' command
+pub fn handle_jobs(job_control: &mut JobControl) -> String {
+    // Get list of all jobs
+    let jobs: Vec<&crate::jobs::Job> = job_control.list_jobs();
+    
+    if jobs.is_empty() {
+        return "No jobs".to_string();
+    }
+
+    let mut output: String = String::new();
+    
+    // Format job listing
+    for job in jobs {
+        let current_marker = if Some(job.pid) == job_control.get_current_job().map(|j| j.pid) {
+            "+"
+        } else {
+            "-"
+        };
+
+        let status_str = match job.status {
+            JobStatus::Running => "Running",
+            JobStatus::Stopped => "Stopped",
+            JobStatus::Done => "Done",
+        };
+
+        output.push_str(&format!(
+            "[{}]{} {} {}: {}\n",
+            job.pid, current_marker, status_str, job.pid, job.command
+        ));
+    }
+
+    output
 }

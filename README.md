@@ -76,19 +76,6 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
 ### Built-in Commands
 
 - cd <directory>: Change the current directory
-- ls [directory] [-l] [-a] [-d] [-c|color]: List contents of a directory
-  - -l: Use long listing format
-  - -a: Show hidden files
-  - -d: List directories themselves, not their contents
-- cp [-r|R] [-f] <source> <destination>: Copy files or directories
-  - -r, -R: Copy directories recursively
-  - -f: Force copy, overwrite destination if it exists
-- mv [-f] <source> <destination>: Move files or directories
-  - -f: Force move, overwrite destination if it exists
-- rm [-f] <file>: Remove a file
-  - -f: Force removal without prompt
-- mkdir [-p] <directory>: Create a new directory
-  - -p: Create parent directories as needed
 - history [--size|s] [--clear|c]: Display command history
 - exit: Exit the shell
 - summon [-w] <command>: Open an *external* command in a new terminal window

@@ -11,6 +11,11 @@ pub fn parse_args(args: &[String]) -> (Vec<String>, HashMap<String, Option<Strin
         if arg.starts_with("--") {
             // Long option
             let option: String = arg[2..].to_string();
+            // Don't accept any arguments past a blank long option
+            if arg == "--"
+            {
+                return (non_flag_args, parsed_args);
+            }
             if i + 1 < args.len() && !args[i + 1].starts_with('-') && value_args.contains(&args[i + 1]) {
                 // Option with value
                 parsed_args.insert(option, Some(args[i + 1].clone()));

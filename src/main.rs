@@ -1,4 +1,4 @@
-// Important TODOs: Fix updating, which evidently never worked.
+// Important TODOs: Fix updating, which evidently never worked; Fix job control
 // MAJOR TODOs: export for env vars, wildcards/regex (*, ?, []), job control, prompt customization with PS1, PS2, etc.
 // HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables).
 pub mod editing;
@@ -10,6 +10,11 @@ pub mod commands;
 pub mod helpers;
 pub mod command_parsing;
 pub mod update;
+pub mod jobs;
+
+#[cfg(feature = "use-libc")]
+extern crate libc;
+
 
 use crate::editing::{CommandHinter, AutoCompleter, LineHighlighter};
 use crate::config::Config;
@@ -18,6 +23,7 @@ use crate::globals::ShellState;
 use crate::helpers::get_history_file_path;
 use crate::update::{update_nash, get_local_version, get_remote_version};
 use arguments::parse_arg_vec;
+use crate::jobs::{JobControl, RECEIVED_SIGTSTP, setup_signal_handlers};
 use rustyline::{
     completion::{Completer, Pair},
     error::ReadlineError,
@@ -33,6 +39,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::exit,
+    sync::atomic::Ordering
 };
 use tokio::runtime::Runtime;
 use whoami::fallible;
@@ -48,18 +55,15 @@ fn main() {
             Err(_) => {eprintln!("An error occurred when initializing the config."); exit(1)}
         };
         let mut state: ShellState = ShellState {
-            cwd: std::env::current_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("/"))
-                .to_string_lossy()
-                .to_string(),
             hostname: fallible::hostname().unwrap(),
             username: fallible::username().unwrap(),
         };
-        env::set_var("IV", eval(&mut state, &mut conf, "env".to_owned(), true));
+        let job_control: &mut JobControl = &mut JobControl::new();
+        env::set_var("IV", eval(&mut state, &mut conf, job_control, "env".to_owned(), true));
         if args.len() <= 1 {
-            repl(&mut state, &mut conf);
+            repl(&mut state, &mut conf, job_control);
         } else {
-            handle_nash_args(&mut conf, args).await;
+            handle_nash_args(&mut conf, job_control, args).await;
         }
     });
 }
@@ -122,10 +126,10 @@ impl Highlighter for ShellHelper {
     }
 }
 
-fn repl(state: &mut ShellState, conf: &mut Config) {
+fn repl(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl) {
     let history_file: PathBuf = get_history_file_path();
     let helper: ShellHelper = ShellHelper {
-        completer: AutoCompleter::new(PathBuf::from(&state.cwd)),
+        completer: AutoCompleter::new(PathBuf::from(env::current_dir().unwrap_or(PathBuf::from("/")))),
         highlighter: LineHighlighter::new(),
         hinter: CommandHinter::new(),
         validator: MatchingBracketValidator::new(),
@@ -137,20 +141,64 @@ fn repl(state: &mut ShellState, conf: &mut Config) {
         println!("No previous history.");
     }
 
+    // Setup signal handlers
+    if let Err(e) = setup_signal_handlers() {
+        eprintln!("Warning: Failed to setup signal handlers: {}", e);
+    }
+
     loop {
-        let prompt: String = format!("[{}@{} {}]> ", state.username, state.hostname, state.cwd);
+        let prompt: String = format!("[{}@{} {}]> ", state.username, state.hostname, env::current_dir().unwrap_or(PathBuf::from("/")).display());
+        
+        // Check if we received SIGTSTP
+        if RECEIVED_SIGTSTP.load(Ordering::SeqCst) {
+            RECEIVED_SIGTSTP.store(false, Ordering::SeqCst);
+            
+            // If there's a current foreground job, stop it
+            if let Some(current_job) = job_control.get_current_job() {
+                if let Err(e) = job_control.stop_job(current_job.pid) {
+                    eprintln!("Failed to stop job: {}", e);
+                }
+                continue;
+            }
+        }
+
         match rl.readline(&prompt) {
             Ok(line) => {
                 rl.add_history_entry(line.as_str());
                 rl.save_history(&history_file).unwrap();
-                let result: String = eval(state, conf, line, false);
+                
+                // Before evaluating, ensure we're in the foreground
+                unsafe {
+                    let shell_pgid = libc::getpgrp();
+                    if libc::tcsetpgrp(libc::STDIN_FILENO, shell_pgid) == -1 {
+                        eprintln!("Warning: Failed to take terminal control");
+                    }
+                }
+                //println!("main Made it -2 (call eval)");
+                let result: String = eval(state, conf, job_control, line, false);
                 print(result);
-
+                //println!("main Made it -1 (printed result)");
+                
+                //println!("main Made it -0.5 (reached if)");
+                if RECEIVED_SIGTSTP.load(Ordering::SeqCst) {
+                    //println!("main Made it 0");
+                    RECEIVED_SIGTSTP.store(false, Ordering::SeqCst);
+                    //println!("main Made it 1");
+                    println!("\nJob stopped");
+                    //println!("main Made it 2");
+                    if let Some(job) = job_control.get_current_job() {
+                        println!("[{}] Stopped    {}", job.pid, job.command);
+                    }
+                }
+                //println!("main Made it 3 (passed if)");
+                job_control.cleanup_jobs();   
+                //println!("main Made it 4 (passed cleanup)");             
+                
                 // Update the current directory in the AutoCompleter
                 if let Some(helper) = rl.helper_mut() {
                     helper
                         .completer
-                        .update_current_dir(PathBuf::from(&state.cwd));
+                        .update_current_dir(env::current_dir().unwrap_or(PathBuf::from("/")));
                 }
             }
             Err(ReadlineError::Interrupted) => {
@@ -170,8 +218,7 @@ fn repl(state: &mut ShellState, conf: &mut Config) {
     conf.save_rules();
 }
 
-// TODO: use parse_args() in handling nash's arguments.
-async fn handle_nash_args(conf: &mut Config, args: Vec<String>) {
+async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args: Vec<String>) {
     let (main_args, flag_args) = parse_arg_vec(&args);
     let update: bool = flag_args.contains_key("update") || flag_args.contains_key("u");
     let force: bool = flag_args.contains_key("force") || flag_args.contains_key("f");
@@ -184,15 +231,11 @@ async fn handle_nash_args(conf: &mut Config, args: Vec<String>) {
         match fs::read_to_string(script_path) {
             Ok(contents) => {
                 let mut state: ShellState = ShellState {
-                    cwd: env::current_dir()
-                        .unwrap_or_else(|_| PathBuf::from("/"))
-                        .to_string_lossy()
-                        .to_string(),
                     hostname: fallible::hostname().unwrap(),
                     username: fallible::username().unwrap(),
                 };
                 for line in contents.lines() {
-                    let result: String = eval(&mut state, conf, line.to_string(), false);
+                    let result: String = eval(&mut state, conf, job_control, line.to_string(), false);
                     print(result);
                 }
             }

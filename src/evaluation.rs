@@ -3,17 +3,18 @@ use crate::globals::*;
 use crate::commands::*;
 use crate::helpers::*;
 use crate::command_parsing::*;
+use crate::jobs::{JobControl, RECEIVED_SIGTSTP};
 use std::process::{self, Stdio, Command};
-use std::{fs::OpenOptions, io::{Write, Error}, env, path::PathBuf, collections::HashMap};
+use std::{fs::OpenOptions, io::{Write, Error}, env, path::PathBuf, collections::HashMap, os::unix::process::CommandExt, sync::atomic::Ordering};
 
-pub fn eval(state: &mut ShellState, conf: &mut Config, cmd: String, internal: bool) -> String {
+pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl, cmd: String, internal: bool) -> String {
     let chars_to_check: [char; 3] = [';', '|', '>'];
 
     if cmd.contains(|c| chars_to_check.contains(&c)) {
-        return special_eval(state, conf, cmd);
+        return special_eval(state, conf, job_control, cmd);
     }
 
-    let expanded_cmd: String = if cmd.starts_with('.') { lim_expand(&cmd) } else { expand(state, &cmd) };
+    let expanded_cmd: String = if cmd.starts_with('.') { lim_expand(&cmd) } else { expand(&cmd) };
     let cmd_parts: Vec<String> = split_command(&expanded_cmd);
 
     if cmd_parts.is_empty() {
@@ -22,7 +23,7 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, cmd: String, internal: bo
 
     // Check if the first part is an environment variable assignment
     if cmd_parts[0].contains('=') {
-        return env_var_eval(state, cmd_parts[0].clone());
+        return env_var_eval(job_control, cmd_parts[0].clone());
     }
 
     // Load aliases
@@ -39,12 +40,12 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, cmd: String, internal: bo
     };
 
     if expanded_cmd_parts[0].as_str().starts_with('.') {
-        execute_file(state, &cmd[1..], &expanded_cmd_parts[1..])
+        execute_file(&cmd[1..], &expanded_cmd_parts[1..])
     }
     else {
         match expanded_cmd_parts[0].as_str() {
             cmd if cmd.starts_with('.') => "This path should be unreachable.".to_owned(),
-            "cd" => handle_cd(state, &expanded_cmd_parts),
+            "cd" => handle_cd(&expanded_cmd_parts),
             "history" => handle_history(&expanded_cmd_parts),
             "exit" => {
                 println!("Exiting...");
@@ -58,11 +59,14 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, cmd: String, internal: bo
             "set" => set_conf_rule(conf, &expanded_cmd_parts),
             "unset" => unset_conf_rule(conf, &expanded_cmd_parts),
             "rconf" => read_conf(conf, &expanded_cmd_parts),
-            "reset" => reset(conf, state, get_nash_dir()),
-            "pwd" => state.cwd.clone(),
+            "reset" => reset(conf, get_nash_dir()),
+            "fg" => handle_fg(&expanded_cmd_parts, job_control),
+            "bg" => handle_bg(&expanded_cmd_parts, job_control),
+            "jobs" => handle_jobs(job_control),
+            "pwd" => env::current_dir().unwrap().to_str().unwrap().to_string(),
             _ => {
                 // If not a built-in command, execute as an external command
-                let result: String = execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts, internal);
+                let result: String = execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts, internal, job_control);
                 if !result.is_empty() {
                     return format!("{}", result);
                 }
@@ -72,7 +76,7 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, cmd: String, internal: bo
     }
 }
 
-pub fn special_eval(state: &mut ShellState, conf: &mut Config, cmd: String) -> String {
+pub fn special_eval(state: &mut ShellState, conf: &mut Config , job_control: &mut JobControl, cmd: String) -> String {
     let mut result: String = String::new();
     let commands: Vec<String> = cmd.split(';').map(|s| s.trim().to_owned()).collect();
 
@@ -80,9 +84,9 @@ pub fn special_eval(state: &mut ShellState, conf: &mut Config, cmd: String) -> S
         if command.contains("|") {
             result = pipe_eval(command);
         } else if command.contains(">") {
-            result = out_redir_eval(state, conf, command);
+            result = out_redir_eval(state, conf, job_control, command);
         } else {
-            result = eval(state, conf, command, false);
+            result = eval(state, conf, job_control, command, false);
         }
     }
     result
@@ -124,7 +128,7 @@ pub fn pipe_eval(cmd: String) -> String {
     input
 }
 
-pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, cmd: String) -> String {
+pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl, cmd: String) -> String {
     let parts: Vec<String> = if cmd.contains("2>>") {
         cmd.splitn(2, "2>>").map(|s| s.trim().to_owned()).collect()
     } else if cmd.contains(">>") {
@@ -153,7 +157,7 @@ pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, cmd: String) ->
 
     match file_options.open(&file_path) {
         Ok(mut file) => {
-            let output: String = eval(state, conf, command, false);
+            let output: String = eval(state, conf, job_control, command, false);
             match file.write_all(output.as_bytes()) {
                 Ok(_) => NO_RESULT.to_owned(),
                 Err(e) => format!("Failed to write to file: {}", e),
@@ -162,32 +166,84 @@ pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, cmd: String) ->
         Err(e) => format!("Failed to open file: {}", e),
     }
 }
-pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool) -> String {
+pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool, job_control: &mut JobControl) -> String {
     match find_command_in_path(cmd) {
         Some(path) => {
-            let mut command: Command = Command::new(path);
+            //println!("Made it 0");
+            let mut command = Command::new(path);
             if cmd_parts.len() > 1 {
                 command.args(&cmd_parts[1..]);
+                //println!("Made it 1");
             }
+
+            command.process_group(0); // Create a new process group
+            //println!("Made it 2");
 
             if internal {
                 command.stdin(Stdio::null());
                 command.stdout(Stdio::null());
                 command.stderr(Stdio::null());
-            }
-            else {
+                //println!("Made it 3 int");
+            } else {
                 command.stdin(Stdio::inherit());
                 command.stdout(Stdio::inherit());
                 command.stderr(Stdio::inherit());
+                //println!("Made it 3 ext");
             }
-           
 
-            match command.status() {
-                Ok(status) => {
-                    if status.success() {
-                        NO_RESULT.to_owned()
+            match command.spawn() {
+                Ok(mut child) => {
+                    let pid = child.id() as libc::pid_t;
+                    let cmd_string = cmd_parts.join(" ");
+                    //println!("Made it 4");
+                    job_control.add_job(pid, cmd_string.clone());
+                    //println!("Made it 5");
+                    if !internal {
+                        // Give terminal control to the child process group
+                        unsafe {
+                            libc::tcsetpgrp(libc::STDIN_FILENO, pid);
+                            //println!("Made it 6");
+                        }
+
+                        // Wait for the child process
+                        loop {
+                            match child.try_wait() {
+                                Ok(Some(status)) => {
+                                    //println!("Took control");
+                                    // Take back terminal control
+                                    unsafe {
+                                        libc::tcsetpgrp(libc::STDIN_FILENO, libc::getpgrp());
+                                        //println!("Made it 7");
+                                    }
+                                    if status.success() {
+                                        job_control.remove_job(pid);
+                                        //println!("Made it 8");
+                                        return NO_RESULT.to_owned();
+                                    } else {
+                                        //println!("Made it 9");
+                                        return format!("Command exited with status: {}", status);
+                                    }
+                                }
+                                Ok(None) => {
+                                    //println!("Waiting for control");
+                                    // Check if we received SIGTSTP
+                                    if RECEIVED_SIGTSTP.load(Ordering::SeqCst) {
+                                        RECEIVED_SIGTSTP.store(false, Ordering::SeqCst);
+                                        job_control.stop_job(pid).unwrap();
+                                        unsafe {
+                                            libc::tcsetpgrp(libc::STDIN_FILENO, libc::getpgrp());
+                                        }
+                                        println!("Job stopped: {}", cmd_string);
+                                        return NO_RESULT.to_owned();
+                                    }
+                                    std::thread::sleep(std::time::Duration::from_millis(100));
+                                }
+                                Err(e) => return format!("Error waiting for command: {}", e),
+                            }
+                        }
                     } else {
-                        format!("Command exited with status: {}", status)
+                        //println!("Made it 10");
+                        NO_RESULT.to_owned()
                     }
                 }
                 Err(e) => format!("Failed to execute command: {}", e),
@@ -196,6 +252,7 @@ pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool)
         None => format!("Command not found: {}", cmd),
     }
 }
+
 fn find_command_in_path(cmd: &str) -> Option<String> {
     if let Ok(path) = env::var("PATH") {
         for dir in path.split(":") {
@@ -208,7 +265,7 @@ fn find_command_in_path(cmd: &str) -> Option<String> {
     None
 }
 
-pub fn env_var_eval(_state: &ShellState, cmd: String) -> String {
+pub fn env_var_eval(job_control: &mut JobControl, cmd: String) -> String {
     let count: usize = cmd.chars().filter(|c| *c == '=').count();
     if count > 1 {
         return "Command contains more than one environment variable assignment (parsing issue)"
@@ -233,7 +290,7 @@ pub fn env_var_eval(_state: &ShellState, cmd: String) -> String {
         if let Ok(value) = env::var(var_name) {
             if cmd.trim() == format!("${}", var_name) {
                 // If the command is just the variable, attempt to execute it
-                return execute_external_command(&value, &[value.clone()], false);
+                return execute_external_command(&value, &[value.clone()], false, job_control);
             } else {
                 // Otherwise, return the value
                 return value;
@@ -246,11 +303,11 @@ pub fn env_var_eval(_state: &ShellState, cmd: String) -> String {
     // If we reach here, it means there was no assignment or extraction
     "Invalid environment variable operation".to_owned()
 }
-pub fn execute_file(state: &ShellState, path: &str, args: &[String]) -> String {
+pub fn execute_file(path: &str, args: &[String]) -> String {
     let full_path: PathBuf = if path.starts_with('/') {
         PathBuf::from(path)
     } else {
-        PathBuf::from(&state.cwd).join(path)
+        env::current_dir().unwrap_or(PathBuf::from("/")).join(path)
     };
 
     if full_path.is_file() {

@@ -2,9 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 
 pub struct ShellState {
-    pub cwd: String,
     pub username: String,
-    pub hostname: String,
+    pub hostname: String
 }
 pub const NO_RESULT: &str = "";
 
