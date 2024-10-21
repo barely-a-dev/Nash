@@ -30,11 +30,21 @@ jobs:
     - name: Install cargo-deb
       run: cargo install cargo-deb
 
-    - name: Build Rust project
+    - name: Build Nash project
       run: cargo build --release
 
+    - name: Build nash_build_manager project
+      run: |
+        cd ./nash_build_manager
+        cargo build --release
+        cd ..
+
     - name: Create Debian package
-      run: cargo deb -o ./nash.deb
+      run: |
+        mkdir -p debian/usr/bin
+        cp target/release/nash debian/usr/bin/
+        cp nash_build_manager/target/release/nash_build_manager debian/usr/bin/
+        cargo deb -p nash -o ./nash.deb
 
     - name: Run install script
       run: |
@@ -67,7 +77,7 @@ jobs:
         draft: false
         prerelease: false
 
-    - name: Upload Release Assets
+    - name: Upload Nash Release Asset
       if: steps.check_release.outputs.exists == 'false'
       uses: actions/upload-release-asset@v1
       env:
@@ -76,6 +86,17 @@ jobs:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
         asset_path: ./target/release/nash
         asset_name: nash
+        asset_content_type: application/octet-stream
+
+    - name: Upload nash_build_manager Release Asset
+      if: steps.check_release.outputs.exists == 'false'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./nash_build_manager/target/release/nash_build_manager
+        asset_name: nash_build_manager
         asset_content_type: application/octet-stream
 
     - name: Upload Debian Package
