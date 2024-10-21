@@ -88,7 +88,7 @@ pub fn expand_home(cmd: &str) -> Cow<str> {
     if cmd.contains('~') {
         match dirs::home_dir() {
             Some(home) => {
-                let home_str = home.to_string_lossy();
+                let home_str: Cow<'_, str> = home.to_string_lossy();
                 Cow::Owned(cmd.replace('~', &home_str))
             }
             None => Cow::Borrowed(cmd),

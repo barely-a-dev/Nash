@@ -58,7 +58,7 @@ impl AutoCompleter {
         commands.sort();
         commands.dedup();
 
-        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let home_dir: PathBuf = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
 
         AutoCompleter { current_dir, commands, home_dir }
     }
@@ -102,8 +102,8 @@ impl Completer for AutoCompleter {
         }
 
         // File/directory completion
-        let path = self.expand_tilde(word);
-        let path = if path.is_absolute() {
+        let path: PathBuf = self.expand_tilde(word);
+        let path: PathBuf = if path.is_absolute() {
             path
         } else {
             self.current_dir.join(path)

@@ -3,16 +3,12 @@ use crate::globals::*;
 use crate::commands::*;
 use crate::helpers::*;
 use crate::command_parsing::*;
-use crate::jobs::{JobControl, RECEIVED_SIGTSTP, JobStatus};
+use crate::jobs::{JobControl, JobStatus};
 use std::process::{self, Stdio, Command};
-use std::{fs::OpenOptions, io::{Write, Error}, env, path::PathBuf, collections::HashMap, os::unix::process::CommandExt, sync::atomic::Ordering};
+use std::{fs::OpenOptions, io::{Write, Error}, env, path::PathBuf, collections::HashMap, os::unix::process::CommandExt};
 
 pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl, cmd: String, internal: bool) -> String {
     let chars_to_check: [char; 3] = [';', '|', '>'];
-
-    if cmd.contains(|c| chars_to_check.contains(&c)) {
-        return special_eval(state, conf, job_control, cmd);
-    }
 
     let expanded_cmd: String = if cmd.starts_with('.') { lim_expand(&cmd) } else { expand(&cmd) };
     let cmd_parts: Vec<String> = split_command(&expanded_cmd);
@@ -38,6 +34,10 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobCont
     } else {
         cmd_parts
     };
+
+    if cmd.contains(|c| chars_to_check.contains(&c)) {
+        return special_eval(state, conf, job_control, expanded_cmd_parts.join(" "));
+    }
 
     if expanded_cmd_parts[0].as_str().starts_with('.') {
         execute_file(&cmd[1..], &expanded_cmd_parts[1..])
@@ -102,12 +102,15 @@ pub fn pipe_eval(cmd: String) -> String {
         let args: &[String] = &command_parts[1..];
 
         // Create a command with the input as stdin
-        let mut child: process::Child = Command::new(command)
+        let mut child: process::Child = match Command::new(command)
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
-            .expect("Failed to start command");
+            {
+                Ok(c) => c,
+                Err(e) => return format!("An error occurred when running the command to get piped to: {}. Command: \"{}\". Problematic part: \"{}\"", e, cmd, command)
+            };
 
         // Write the previous command's output to this command's input
         if !input.is_empty() {
@@ -121,7 +124,11 @@ pub fn pipe_eval(cmd: String) -> String {
         if output.status.success() {
             input = String::from_utf8_lossy(&output.stdout).into_owned();
         } else {
-            return format!("Command failed and output error: {}", String::from_utf8_lossy(&output.stderr));
+            let erro: std::borrow::Cow<'_, str> = String::from_utf8_lossy(&output.stderr);
+            if !erro.is_empty() {
+                return format!("Command failed and output error: {}", String::from_utf8_lossy(&output.stderr));
+            }
+            return NO_RESULT.to_owned();
         }
     }
 
@@ -166,7 +173,9 @@ pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, job_control: &m
         Err(e) => format!("Failed to open file: {}", e),
     }
 }
+
 pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool, job_control: &mut JobControl) -> String {
+    println!("DEBUG:\n cmd:\n  {}\n parts:\n  {:#?}", cmd, cmd_parts);
     match find_command_in_path(cmd) {
         Some(path) => {
             let mut command = Command::new(path);
@@ -214,7 +223,8 @@ pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool,
                                         NO_RESULT.to_owned()
                                     },
                                     JobStatus::Stopped => {
-                                        println!("Job stopped: {}", cmd_string);
+                                        let job_count = job_control.jobs.len();
+                                        println!("\n[{}]+  Stopped                 {}", job_count, cmd_string);
                                         NO_RESULT.to_owned()
                                     },
                                     _ => format!("Unexpected job status: {:?}", status),

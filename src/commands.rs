@@ -36,7 +36,7 @@ pub fn reset(conf: &mut Config, nash_dir: PathBuf) -> String
         Some(v) =>
         {
             if v.parse::<bool>().unwrap_or(false) {
-                let nash_dir_disp = nash_dir.display().to_string();
+                let nash_dir_disp: String = nash_dir.display().to_string();
                 match remove_file("/usr/bin/nash") {
                     Ok(_) => println!("Successfully deleted /usr/bin/nash."),
                     Err(e) => eprintln!("Could not delete /usr/bin/nash file. Error: {}", e)

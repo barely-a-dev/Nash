@@ -1,8 +1,7 @@
 
 use crate::{globals::*, jobs::JobControl};
-use std::{collections::HashMap, fs, ops::Sub, path::PathBuf};
+use std::{collections::HashMap, fs, path::PathBuf};
 use libc;
-use std::str::FromStr;
 
 pub fn get_history_file_path() -> PathBuf {
     let mut path: PathBuf = get_nash_dir();
@@ -43,7 +42,11 @@ pub fn parse_job_specifier(spec: &str, job_control: &JobControl) -> Result<libc:
         match spec[1..].parse::<usize>() {
             Ok(job_num) => {
                 let jobs = job_control.list_jobs();
-                jobs.get(job_num)
+                if job_num < 1
+                {
+                    return std::result::Result::Err("No such job".to_owned());
+                }
+                jobs.get(job_num - 1)
                     .map(|job| job.pid)
                     .ok_or_else(|| "No such job".to_string())
             }

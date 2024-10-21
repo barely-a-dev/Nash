@@ -1,6 +1,6 @@
-// Important TODOs: Fix updating, which evidently never worked; Fix job control
-// MAJOR TODOs: export for env vars, wildcards/regex (*, ?, []), job control, prompt customization with PS1, PS2, etc.
-// HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables).
+// Important TODOs: Fix updating, which evidently never worked
+// MAJOR TODOs: export for env vars; wildcards/regex (*, ?, []), job control; prompt customization with PS1, PS2, etc.
+// HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables); [[ expression ]] and (( expression ))
 pub mod editing;
 pub mod config;
 pub mod arguments;
@@ -9,7 +9,6 @@ pub mod globals;
 pub mod commands;
 pub mod helpers;
 pub mod command_parsing;
-pub mod update;
 pub mod jobs;
 
 #[cfg(feature = "use-libc")]
@@ -21,7 +20,6 @@ use crate::config::Config;
 use crate::evaluation::eval;
 use crate::globals::ShellState;
 use crate::helpers::get_history_file_path;
-use crate::update::{update_nash, get_local_version, get_remote_version};
 use arguments::parse_arg_vec;
 use crate::jobs::{JobControl, RECEIVED_SIGTSTP, setup_signal_handlers};
 use rustyline::{
@@ -45,21 +43,21 @@ use tokio::runtime::Runtime;
 use whoami::fallible;
 
 fn main() {
+    env::set_var("0", "nash"); // In case something goes wrong.
     let runtime: Runtime = Runtime::new().unwrap();
+    let mut conf: Config = match Config::new()
+    {
+        Ok(c) => c,
+        Err(_) => {eprintln!("An error occurred when initializing the config."); exit(1)}
+    };
+    let mut state: ShellState = ShellState {
+        hostname: fallible::hostname().unwrap(),
+        username: fallible::username().unwrap(),
+    };
+    let job_control: &mut JobControl = &mut JobControl::new();
+    env::set_var("IV", eval(&mut state, &mut conf, job_control, "SHELL=/usr/bin/nash".to_owned(), true));
     runtime.block_on(async {
         let args: Vec<String> = std::env::args().collect();
-        env::set_var("0", "nash");
-        let mut conf: Config = match Config::new()
-        {
-            Ok(c) => c,
-            Err(_) => {eprintln!("An error occurred when initializing the config."); exit(1)}
-        };
-        let mut state: ShellState = ShellState {
-            hostname: fallible::hostname().unwrap(),
-            username: fallible::username().unwrap(),
-        };
-        let job_control: &mut JobControl = &mut JobControl::new();
-        env::set_var("IV", eval(&mut state, &mut conf, job_control, "env".to_owned(), true));
         if args.len() <= 1 {
             repl(&mut state, &mut conf, job_control);
         } else {
@@ -202,6 +200,7 @@ fn repl(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl)
                 }
             }
             Err(ReadlineError::Interrupted) => {
+                // Need to actually handle as SIGINT
                 println!("CTRL-C");
                 break;
             }
@@ -251,29 +250,9 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
     }
 
     if update {
-        if !force {
-            println!("Checking for updates...");
-
-            // Compare local and remote version
-            let local_ver: String = get_local_version();
-            let remote_ver: String = get_remote_version().await;
-
-            if local_ver.trim() != remote_ver.trim() {
-                println!(
-                    "Update detected. Local version: {}, Remote version: {}",
-                    local_ver, remote_ver
-                );
-                update_nash().await;
-            } else {
-                println!(
-                    "Nash is already up to date in major updates (version {}).",
-                    local_ver
-                );
-            }
-        } else {
-            println!("Updating nash without version check as force flag was used.");
-            update_nash().await;
-        }
+        // TODO: Check if build manager is installed, if not, install it. Otherwise, update and pass --force flag on to build manager.
+        // For now, just tell the user to install and use nash_build_manager themselves.
+        println!("Install NBM (Nash Build Manager) from the github and run it with the --update and --force flags.");
         return;
     }
 
