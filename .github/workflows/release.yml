@@ -41,6 +41,8 @@ jobs:
 
     - name: Create Debian package
       run: |
+        ls nash_build_mgr/
+        ls nash_build_mgr/target/release
         mkdir -p debian/usr/bin
         cp target/release/nash debian/usr/bin/
         cp nash_build_mgr/target/release/nash_build_mgr debian/usr/bin/
