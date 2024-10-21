@@ -118,26 +118,82 @@ impl JobControl {
         }
     }
 
-    /// Wait for job status changes
-    pub fn wait_for_job(&mut self, pid: pid_t) -> Result<()> {
+    pub fn resume_job(&mut self, pid: libc::pid_t, foreground: bool) -> Result<()> {
+        if let Some(job) = self.jobs.get_mut(&pid) {
+            unsafe {
+                // Continue the process
+                if libc::kill(-pid, libc::SIGCONT) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+
+                if foreground {
+                    // Give terminal control to the process group
+                    if libc::tcsetpgrp(libc::STDIN_FILENO, pid) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+
+                    // Wait for the job
+                    let mut status: libc::c_int = 0;
+                    if libc::waitpid(pid, &mut status, libc::WUNTRACED) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+
+                    // Take back terminal control
+                    let shell_pgid = libc::getpgrp();
+                    if libc::tcsetpgrp(libc::STDIN_FILENO, shell_pgid) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+
+                    if libc::WIFSTOPPED(status) {
+                        job.status = JobStatus::Stopped;
+                        println!("Job stopped: {}", job.command);
+                    } else {
+                        self.remove_job(pid);
+                    }
+                } else {
+                    job.status = JobStatus::Running;
+                }
+            }
+            
+            self.current_job = Some(pid);
+            Ok(())
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Job not found"))
+        }
+    }
+
+    pub fn wait_for_job(&mut self, pid: pid_t) -> Result<JobStatus> {
         let mut status: i32 = 0;
-        unsafe {
-            if libc::waitpid(pid, &mut status, WUNTRACED) == -1 {
+        loop {
+            let wait_result = unsafe { libc::waitpid(pid, &mut status, libc::WUNTRACED) };
+            if wait_result == -1 {
                 return Err(Error::last_os_error());
             }
-        }
 
-        if let Some(job) = self.jobs.get_mut(&pid) {
-            // Update job status based on wait result
             if libc::WIFSTOPPED(status) {
-                job.status = JobStatus::Stopped;
+                if let Some(job) = self.jobs.get_mut(&pid) {
+                    job.status = JobStatus::Stopped;
+                }
+                return Ok(JobStatus::Stopped);
             } else if libc::WIFEXITED(status) || libc::WIFSIGNALED(status) {
-                job.status = JobStatus::Done;
-                self.current_job = None;
+                if let Some(job) = self.jobs.get_mut(&pid) {
+                    job.status = JobStatus::Done;
+                }
+                return Ok(JobStatus::Done);
+            }
+
+            // Check if we received SIGTSTP
+            if RECEIVED_SIGTSTP.load(Ordering::SeqCst) {
+                RECEIVED_SIGTSTP.store(false, Ordering::SeqCst);
+                if let Some(job) = self.jobs.get_mut(&pid) {
+                    job.status = JobStatus::Stopped;
+                }
+                unsafe {
+                    libc::kill(-pid, libc::SIGTSTP);
+                }
+                return Ok(JobStatus::Stopped);
             }
         }
-
-        Ok(())
     }
 
     /// Remove completed jobs from the job list
@@ -156,7 +212,7 @@ impl JobControl {
     }
 
     /// Bring a job to the foreground
-    pub fn foreground_job(&mut self, pid: pid_t) -> Result<()> {
+    pub fn foreground_job(&mut self, pid: pid_t) -> Result<JobStatus> {
         // First continue the job if it was stopped
         if let Some(job) = self.jobs.get(&pid) {
             if job.status == JobStatus::Stopped {

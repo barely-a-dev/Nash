@@ -3,7 +3,7 @@ use crate::globals::*;
 use crate::commands::*;
 use crate::helpers::*;
 use crate::command_parsing::*;
-use crate::jobs::{JobControl, RECEIVED_SIGTSTP};
+use crate::jobs::{JobControl, RECEIVED_SIGTSTP, JobStatus};
 use std::process::{self, Stdio, Command};
 use std::{fs::OpenOptions, io::{Write, Error}, env, path::PathBuf, collections::HashMap, os::unix::process::CommandExt, sync::atomic::Ordering};
 
@@ -169,80 +169,60 @@ pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, job_control: &m
 pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool, job_control: &mut JobControl) -> String {
     match find_command_in_path(cmd) {
         Some(path) => {
-            //println!("Made it 0");
             let mut command = Command::new(path);
             if cmd_parts.len() > 1 {
                 command.args(&cmd_parts[1..]);
-                //println!("Made it 1");
             }
 
             command.process_group(0); // Create a new process group
-            //println!("Made it 2");
 
             if internal {
                 command.stdin(Stdio::null());
                 command.stdout(Stdio::null());
                 command.stderr(Stdio::null());
-                //println!("Made it 3 int");
             } else {
                 command.stdin(Stdio::inherit());
                 command.stdout(Stdio::inherit());
                 command.stderr(Stdio::inherit());
-                //println!("Made it 3 ext");
             }
 
             match command.spawn() {
-                Ok(mut child) => {
+                Ok(child) => {
                     let pid = child.id() as libc::pid_t;
                     let cmd_string = cmd_parts.join(" ");
-                    //println!("Made it 4");
                     job_control.add_job(pid, cmd_string.clone());
-                    //println!("Made it 5");
+
                     if !internal {
                         // Give terminal control to the child process group
                         unsafe {
                             libc::tcsetpgrp(libc::STDIN_FILENO, pid);
-                            //println!("Made it 6");
                         }
 
                         // Wait for the child process
-                        loop {
-                            match child.try_wait() {
-                                Ok(Some(status)) => {
-                                    //println!("Took control");
-                                    // Take back terminal control
-                                    unsafe {
-                                        libc::tcsetpgrp(libc::STDIN_FILENO, libc::getpgrp());
-                                        //println!("Made it 7");
-                                    }
-                                    if status.success() {
+                        let result = job_control.wait_for_job(pid);
+
+                        // Always take back terminal control
+                        unsafe {
+                            libc::tcsetpgrp(libc::STDIN_FILENO, libc::getpgrp());
+                        }
+
+                        match result {
+                            Ok(status) => {
+                                match status {
+                                    JobStatus::Done => {
                                         job_control.remove_job(pid);
-                                        //println!("Made it 8");
-                                        return NO_RESULT.to_owned();
-                                    } else {
-                                        //println!("Made it 9");
-                                        return format!("Command exited with status: {}", status);
-                                    }
-                                }
-                                Ok(None) => {
-                                    //println!("Waiting for control");
-                                    // Check if we received SIGTSTP
-                                    if RECEIVED_SIGTSTP.load(Ordering::SeqCst) {
-                                        RECEIVED_SIGTSTP.store(false, Ordering::SeqCst);
-                                        job_control.stop_job(pid).unwrap();
-                                        unsafe {
-                                            libc::tcsetpgrp(libc::STDIN_FILENO, libc::getpgrp());
-                                        }
+                                        NO_RESULT.to_owned()
+                                    },
+                                    JobStatus::Stopped => {
                                         println!("Job stopped: {}", cmd_string);
-                                        return NO_RESULT.to_owned();
-                                    }
-                                    std::thread::sleep(std::time::Duration::from_millis(100));
+                                        NO_RESULT.to_owned()
+                                    },
+                                    _ => format!("Unexpected job status: {:?}", status),
                                 }
-                                Err(e) => return format!("Error waiting for command: {}", e),
-                            }
+                            },
+                            Err(e) => format!("Error waiting for command: {}", e),
                         }
                     } else {
-                        //println!("Made it 10");
                         NO_RESULT.to_owned()
                     }
                 }

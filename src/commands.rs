@@ -300,51 +300,43 @@ pub fn handle_cd(cmd_parts: &[String]) -> String {
     }
 }
 
-/// Handle the 'fg' (foreground) command
 pub fn handle_fg(cmd: &[String], job_control: &mut JobControl) -> String {
     let (main_args, _) = parse_args(cmd);
     
-    // If no job specified, use current job
-    let job: i32 = if main_args.is_empty() {
+    let job: libc::pid_t = if main_args.is_empty() {
         match job_control.get_current_job() {
             Some(job) => job.pid,
             None => return "No current job".to_string(),
         }
     } else {
-        // Parse job number/pid from argument
         match parse_job_specifier(&main_args[0], job_control) {
             Ok(pid) => pid,
             Err(e) => return e,
         }
     };
 
-    // Attempt to bring job to foreground
-    match job_control.foreground_job(job) {
+    match job_control.resume_job(job, true) {
         Ok(_) => NO_RESULT.to_string(),
         Err(e) => format!("Could not bring job to foreground: {}", e),
     }
 }
 
-/// Handle the 'bg' (background) command
-pub fn handle_bg(cmd: &[String],  job_control: &mut JobControl) -> String {
+pub fn handle_bg(cmd: &[String], job_control: &mut JobControl) -> String {
     let (main_args, _) = parse_args(cmd);
     
-    // If no job specified, use current job
     let job: i32 = if main_args.is_empty() {
         match job_control.get_current_job() {
             Some(job) => job.pid,
             None => return "No current job".to_string(),
         }
     } else {
-        // Parse job number/pid from argument
         match parse_job_specifier(&main_args[0], job_control) {
             Ok(pid) => pid,
             Err(e) => return e,
         }
     };
 
-    // Attempt to continue job in background
-    match job_control.background_job(job) {
+    match job_control.resume_job(job, false) {
         Ok(_) => NO_RESULT.to_string(),
         Err(e) => format!("Could not continue job in background: {}", e),
     }
