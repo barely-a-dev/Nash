@@ -7,7 +7,6 @@ authors = ["barely-a-dev <nahman1234lol12@gmail.com>"]
 license = "GPL-3.0"
 readme = "README.md"
 
-
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 whoami = "1.5.2"
