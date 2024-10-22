@@ -50,6 +50,42 @@ Nash is a simple shell written in Rust, attempting to provide a modern command-l
    chmod +x ./install.sh && ./install.sh
    ```
 
+### Automatic Installation
+
+1. Download the build manager from GH:
+   ```
+   curl -L https://github.com/barely-a-dev/Nash/releases/download/v0.0.9.6.2/nbm -o nbm
+   ```
+2. Make it executable:
+   ```
+   chmod +x nbm
+   ```
+3. Install nash:
+   ```
+   nbm --setver recent
+   ```
+   (or any version instead of recent, IE v0.0.9, or --update)
+4. Remove the initial installer:
+   ```
+   rm nbm
+   ```
+
+### Updating
+
+To update, simply run one of the following commands:
+```
+nbm --setver recent
+```
+```
+nbm --setver v<VERSION_NUM>
+```
+```
+nbm --update
+```
+```
+nash --update
+```
+
 ## Usage
 
 After installation, you can start Nash by typing `nash` in your terminal. The more daring may make nash their default shell by running the following commands:
@@ -64,7 +100,7 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
    chsh -s /usr/bin/nash
    ```
    Enter your password and press enter.
-3. Log out and log back in or restart. Nash will be your default shell!
+3. Log out and log back in or restart. Nash will be your default shell.
 
 ### Command-line Options
 
@@ -97,7 +133,7 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
 
 ## Development Status
 
-Nash is currently in early development (v0.0.9.6.2). While it's functional for basic use, many features are still being implemented or improved.
+Nash is currently in early development (v0.0.9.6.3). While it's functional for basic use, many features are still being implemented or improved.
 
 ## Contributing
 
@@ -127,7 +163,8 @@ The following features and improvements are planned for future releases:
 - [-] Enhanced command-line options
 - [-] Improved argument handling for built-in commands
 - [✔] Support for popular, complex commands and text editors (e.g., Nano, Vim)
-- [-] Self-updating capability
+- [\\] Self-updating capability (instead in NBM, below)
+- [✔] Build management system (accessible via nbm command)
 
 ### Notable version's planned updates
 - 0.1.0: Major bug fix and heavy testing. Will not be released for weeks or months.

@@ -1,6 +1,6 @@
-use std::{env, fs, io::Write, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::{exit, Command}, time::Duration};
+use std::{env, fs, io::{Write, Read}, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::{exit, Command}, time::Duration};
 use git2::Repository;
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 use whoami::fallible;
 use serde_json::Value;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -9,12 +9,12 @@ fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let force: bool = args.contains(&"--force".to_string()) || args.contains(&"-f".to_string());
     let do_update: bool = args.contains(&"--update".to_string()) || args.contains(&"-u".to_string());
-    let list: bool = args.contains(&"--list".to_string());
-    let set_ver: Option<usize> = args.iter().position(|x| x == "--setver");
+    let list: bool = args.contains(&"--list".to_string()) || args.contains(&"-l".to_string());
+    let set_ver: Option<usize> = args.iter().position(|x: &String| x == "--setver" || x == "-s");
 
     let unrecognized_arguments: Vec<String> = args.iter()
-        .filter(|&arg| !["--force", "-f", "--update", "-u", "--setver", "--list"].contains(&arg.as_str()))
-        .filter(|&arg| set_ver.map_or(true, |i| *arg != args[i + 1]))
+        .filter(|&arg| !["--force", "-f", "--update", "-u", "--setver", "-s", "--list", "-l"].contains(&arg.as_str()))
+        .filter(|&arg| set_ver.map_or(true, |i: usize| *arg != args[i + 1]))
         .cloned()
         .collect();
 
@@ -72,7 +72,7 @@ fn list_releases() -> Result<String, Box<dyn std::error::Error>> {
     let client: Client = Client::new();
     let url: &str = "https://api.github.com/repos/barely-a-dev/Nash/releases";
 
-    let response = client
+    let response: reqwest::blocking::Response = client
         .get(url)
         .header("User-Agent", "Nash-GitHub-Release-Checker")
         .timeout(Duration::from_secs(30))
@@ -136,20 +136,19 @@ fn get_most_recent_version() -> Option<String> {
 fn set_version(version: &str) -> bool {
     match find_release(&version) {
         Ok(true) => {
-            let pb = ProgressBar::new(100);
-            pb.set_style(ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
-            .unwrap_or_else(|_| ProgressStyle::default_bar())
-            .progress_chars("##-"));
+            let pb: ProgressBar = ProgressBar::new_spinner();
+            pb.set_style(ProgressStyle::default_spinner()
+                .template("{spinner:.green} [{elapsed_precise}] {msg}")
+                .unwrap_or_else(|_| ProgressStyle::default_spinner())
+            );
 
             // Download release's nash and nbm file
             pb.set_message("Downloading release files");
-            if let Err(e) = download_release_files(version) {
+            if let Err(e) = download_release_files(version, &pb) {
                 pb.finish_with_message("Failed to download release files");
                 eprintln!("Failed to download release files: {}", e);
                 return false;
             }
-            pb.set_position(50);
 
             // Set permissions and move to /usr/bin/
             pb.set_message("Installing binaries");
@@ -173,20 +172,50 @@ fn set_version(version: &str) -> bool {
     }
 }
 
-fn download_release_files(version: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn download_release_files(version: &str, pb: &ProgressBar) -> Result<(), Box<dyn std::error::Error>> {
     let client: Client = Client::new();
     let base_url: String = format!("https://github.com/barely-a-dev/Nash/releases/download/{}", version);
 
+    let total_size: u64 = get_total_size(&client, &base_url)?;
+    pb.set_style(ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} {msg}")
+        .unwrap_or_else(|_| ProgressStyle::default_bar())
+        .progress_chars("##-"));
+    pb.set_length(total_size);
+
+    let mut downloaded = 0;
+
     for binary in &["nash", "nbm"] {
         let url: String = format!("{}/{}", base_url, binary);
-        let response: reqwest::blocking::Response = client.get(&url).send()?;
-        let content = response.bytes()?;
-
+        let mut response: Response = client.get(&url).send()?;
         let mut file: fs::File = fs::File::create(binary)?;
-        file.write_all(&content)?;
+
+        let mut buffer: [u8; 8192] = [0; 8192];
+        while let Ok(n) = response.read(&mut buffer) {
+            if n == 0 { break; }
+            file.write_all(&buffer[..n])?;
+            downloaded += n as u64;
+            pb.set_position(downloaded);
+        }
     }
 
     Ok(())
+}
+
+fn get_total_size(client: &Client, base_url: &str) -> Result<u64, Box<dyn std::error::Error>> {
+    let mut total_size: u64 = 0;
+
+    for binary in &["nash", "nbm"] {
+        let url = format!("{}/{}", base_url, binary);
+        let response = client.head(&url).send()?;
+        total_size += response.headers()
+            .get("content-length")
+            .and_then(|cl| cl.to_str().ok())
+            .and_then(|cls| cls.parse().ok())
+            .unwrap_or(0);
+    }
+
+    Ok(total_size)
 }
 
 fn install_binaries() -> Result<(), Box<dyn std::error::Error>> {

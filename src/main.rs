@@ -36,7 +36,7 @@ use std::{
     env,
     fs,
     path::{Path, PathBuf},
-    process::exit,
+    process::{exit, Command},
     sync::atomic::Ordering
 };
 use tokio::runtime::Runtime;
@@ -245,14 +245,27 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
 
     // Handle other command-line arguments
     if version {
-        println!("v0.0.9.6.2");
+        println!("v0.0.9.6.3");
         return;
     }
 
     if update {
-        // TODO: Check if build manager is installed, if not, install it. Otherwise, update and pass --force flag on to build manager.
-        // For now, just tell the user to install and use nash_build_manager themselves.
-        println!("Install NBM (Nash Build Manager) from the github and run it with the --update and --force flags.");
+        if Path::new("/usr/bin/nbm").exists()
+        {
+            if force
+            {
+                println!("Update command exited with status: {}", Command::new("nbm").args(["--update", "--force"]).status().unwrap().code());
+            }
+            else
+            {
+                println!("Update command exited with status: {}", Command::new("nbm").args(["--update"]).status().unwrap().code());
+            }
+        }
+        else
+        {
+            println!("Please install NBM from the GitHub first.");
+            return;
+        }
         return;
     }
 

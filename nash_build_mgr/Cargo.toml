@@ -1,6 +1,6 @@
 [package]
 name = "nash_build_mgr"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "Nash Build Manager"
 authors = ["barely-a-dev <nahman1234lol12@gmail.com>"]
