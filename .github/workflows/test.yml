@@ -23,4 +23,4 @@ jobs:
         cd ..
     - name: Test
       run: |
-            nash_build_mgr/target/release
+            ls nash_build_mgr/target/release
