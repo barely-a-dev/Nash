@@ -34,8 +34,8 @@ depends = "$auto"
 section = "utility"
 priority = "optional"
 assets = [
-    ["target/release/nash", "usr/bin/", "755"],
-    ["nash_build_manager/target/release/nash_build_manager", "usr/bin/", "755"],
+    ["debian/usr/bin/nash", "usr/bin/", "755"],
+    ["debian/usr/bin/nbm", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/nash/README", "644"],
 ]
 
