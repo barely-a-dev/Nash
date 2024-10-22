@@ -16,6 +16,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Build nash_build_mgr project
+      run: |
+        cd ./nash_build_mgr
+        cargo build --release
+        cd ..
     - name: Test
       run: |
             nash_build_mgr/target/release
