@@ -254,11 +254,11 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
         {
             if force
             {
-                println!("Update command exited with status: {}", Command::new("nbm").args(["--update", "--force"]).status().unwrap().code());
+                println!("Update command exited with status: {}", Command::new("nbm").args(["--update", "--force"]).status().unwrap_or(Default::default()).code().unwrap_or(1));
             }
             else
             {
-                println!("Update command exited with status: {}", Command::new("nbm").args(["--update"]).status().unwrap().code());
+                println!("Update command exited with status: {}", Command::new("nbm").args(["--update"]).status().unwrap_or(Default::default()).code().unwrap_or(1));
             }
         }
         else
