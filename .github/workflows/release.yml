@@ -95,7 +95,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./nash_build_mgr/target/release/nbm
+        asset_path: ./debian/usr/bin/nbm
         asset_name: nbm
         asset_content_type: application/octet-stream
 
