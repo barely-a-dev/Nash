@@ -5,3 +5,4 @@ Cargo.lock
 *.pdb
 file.txt
 src/before.rs
+nash_build_mgr/nash

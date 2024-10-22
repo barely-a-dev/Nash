@@ -1,9 +1,9 @@
-use std::{env, fs, io::Write, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::{exit, Command}};
+use std::{env, fs, io::Write, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::{exit, Command}, time::Duration};
 use git2::Repository;
 use reqwest::blocking::Client;
-use std::time::Duration;
 use whoami::fallible;
 use serde_json::Value;
+use indicatif::{ProgressBar, ProgressStyle};
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -133,21 +133,32 @@ fn get_most_recent_version() -> Option<String> {
     release["tag_name"].as_str().map(String::from)
 }
 
-
 fn set_version(version: &str) -> bool {
     match find_release(&version) {
         Ok(true) => {
+            let pb = ProgressBar::new(100);
+            pb.set_style(ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+            .unwrap_or_else(|_| ProgressStyle::default_bar())
+            .progress_chars("##-"));
+
             // Download release's nash and nbm file
+            pb.set_message("Downloading release files");
             if let Err(e) = download_release_files(version) {
+                pb.finish_with_message("Failed to download release files");
                 eprintln!("Failed to download release files: {}", e);
                 return false;
             }
+            pb.set_position(50);
 
             // Set permissions and move to /usr/bin/
+            pb.set_message("Installing binaries");
             if let Err(e) = install_binaries() {
+                pb.finish_with_message("Failed to install binaries");
                 eprintln!("Failed to install binaries: {}", e);
                 return false;
             }
+            pb.finish_with_message("Version set successfully");
 
             true
         },
@@ -213,41 +224,49 @@ pub fn update(force: bool) {
     }
 }
 
-pub fn update_internal()
-{
+pub fn update_internal() {
+    let pb = ProgressBar::new(100);
+    pb.set_style(ProgressStyle::default_bar()
+    .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+    .unwrap_or_else(|_| ProgressStyle::default_bar())
+    .progress_chars("##-"));
+
     // Check if git is installed
-    println!("Checking if Git is installed...");
+    pb.set_message("Checking if Git is installed");
     match Command::new("git").arg("--version").output() {
-        Ok(_) => println!("Git is installed."),
+        Ok(_) => pb.inc(10),
         Err(_) => {
-            println!("Git is not installed. Please install Git and try again.");
+            pb.finish_with_message("Git is not installed. Please install Git and try again.");
             return;
         }
     }
 
     // Check if Rust is installed
-    println!("Checking if Rust is installed...");
+    pb.set_message("Checking if Rust is installed");
     match Command::new("rustc").arg("--version").output() {
-        Ok(_) => println!("Rust is installed."),
+        Ok(_) => pb.inc(10),
         Err(_) => {
-            println!("Rust is not installed. Please install Rust (https://www.rust-lang.org/tools/install) and try again.");
+            pb.finish_with_message("Rust is not installed. Please install Rust and try again.");
             return;
         }
     }
 
     // Clone or pull the repository
+    pb.set_message("Cloning repository");
     let repo_url: &str = "https://github.com/barely-a-dev/Nash.git";
     let tmp_dir: PathBuf = env::temp_dir().join("nash_update");
     if tmp_dir.exists() {
         if let Err(e) = fs::remove_dir_all(&tmp_dir) {
-            println!("ERROR: Failed to remove existing temporary directory: {}", e);
+            pb.finish_with_message("Failed to remove existing temporary directory");
+            eprintln!("ERROR: Failed to remove existing temporary directory: {}", e);
             return;
         }
     }
     match Repository::clone(repo_url, &tmp_dir) {
-        Ok(_) => println!("Repository cloned successfully"),
+        Ok(_) => pb.inc(20),
         Err(e) => {
-            println!("Failed to clone: {}", e);
+            pb.finish_with_message("Failed to clone repository");
+            eprintln!("Failed to clone: {}", e);
             return;
         }
     }
@@ -256,36 +275,38 @@ pub fn update_internal()
     env::set_current_dir(&tmp_dir).expect("Failed to change directory");
 
     // Build the project
-    println!("Building the project...");
+    pb.set_message("Building the project");
     match Command::new("cargo").args(&["build", "--release"]).status() {
-        Ok(status) if status.success() => println!("Project built successfully."),
+        Ok(status) if status.success() => pb.inc(30),
         _ => {
-            println!("Failed to build the project");
+            pb.finish_with_message("Failed to build the project");
             return;
         }
     }
 
     // Copy the binary to /usr/bin/nash
-    println!("Copying the binary to /usr/bin/nash...");
+    pb.set_message("Copying the binary to /usr/bin/nash");
     let source_path: PathBuf = tmp_dir.join("target/release/nash");
     let destination_path: &Path = Path::new("/usr/bin/nash");
 
     match fs::copy(&source_path, destination_path) {
-        Ok(_) => println!("Binary successfully copied to /usr/bin/nash"),
+        Ok(_) => pb.inc(20),
         Err(e) => {
-            println!("Failed to copy the binary: {}", e);
-            println!("Perhaps you reached this point without running as root?");
+            pb.finish_with_message("Failed to copy the binary");
+            eprintln!("Failed to copy the binary: {}", e);
+            eprintln!("Perhaps you reached this point without running as root?");
             return;
         }
     }
 
     // Clean up: remove the temporary directory
-    println!("Cleaning up...");
+    pb.set_message("Cleaning up");
     if let Err(e) = fs::remove_dir_all(&tmp_dir) {
-        println!("Warning: Failed to remove temporary directory: {}", e);
+        eprintln!("Warning: Failed to remove temporary directory: {}", e);
     }
+    pb.inc(10);
 
-    println!("Update completed successfully!");
+    pb.finish_with_message("Update completed successfully!");
 }
 
 pub fn get_local_version() -> String {
