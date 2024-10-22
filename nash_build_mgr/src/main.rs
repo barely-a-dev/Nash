@@ -32,16 +32,28 @@ fn main() {
         println!("{}", list_releases().unwrap_or("Failed to list releases".to_string()));
         return;
     } else if let Some(set_ver_index) = set_ver {
-        if fallible::username().map(|u| u == "root").unwrap_or(false) {
+        if fallible::username().map(|u: String| u == "root").unwrap_or(false) {
             if set_ver_index >= args.len() - 1 {
-                println!("Usage: nbm --setver v<version_number>");
+                println!("Usage: nbm --setver v<version_number> or nbm --setver recent");
                 return;
             } else {
-                let version = &args[set_ver_index + 1];
-                if set_version(version) {
-                    println!("Successfully set version to {}", version);
+                let version: &String = &args[set_ver_index + 1];
+                if version == "recent" {
+                    if let Some(recent_version) = get_most_recent_version() {
+                        if set_version(&recent_version) {
+                            println!("Successfully set version to the most recent: {}", recent_version);
+                        } else {
+                            eprintln!("Failed to set version to the most recent: {}", recent_version);
+                        }
+                    } else {
+                        eprintln!("Failed to get the most recent version");
+                    }
                 } else {
-                    eprintln!("Failed to set version to {}", version);
+                    if set_version(version) {
+                        println!("Successfully set version to {}", version);
+                    } else {
+                        eprintln!("Failed to set version to {}", version);
+                    }
                 }
             }
         } else {
@@ -101,6 +113,26 @@ fn find_release(ver: &str) -> Result<bool, Box<dyn std::error::Error>> {
         release["tag_name"].as_str().map_or(false, |tag| tag == ver)
     }))
 }
+
+fn get_most_recent_version() -> Option<String> {
+    let client: Client = Client::new();
+    let url: &str = "https://api.github.com/repos/barely-a-dev/Nash/releases/latest";
+
+    let response: reqwest::blocking::Response = client
+        .get(url)
+        .header("User-Agent", "Nash-GitHub-Release-Checker")
+        .timeout(Duration::from_secs(30))
+        .send()
+        .ok()?;
+
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let release: Value = response.json().ok()?;
+    release["tag_name"].as_str().map(String::from)
+}
+
 
 fn set_version(version: &str) -> bool {
     match find_release(&version) {
