@@ -41,11 +41,9 @@ jobs:
 
     - name: Create Debian package
       run: |
-        ls nash_build_mgr/
-        ls nash_build_mgr/target/release
         mkdir -p debian/usr/bin
-        cp target/release/nash debian/usr/bin/
-        cp nash_build_mgr/target/release/nash_build_mgr debian/usr/bin/
+        cp target/release/nash debian/usr/bin/nash
+        cp nash_build_mgr/target/release/nash_build_mgr debian/usr/bin/nbm
         cargo deb -p nash -o ./nash.deb
 
     - name: Run install script
@@ -97,8 +95,8 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./nash_build_mgr/target/release/nash_build_mgr
-        asset_name: nash_build_mgr
+        asset_path: ./nash_build_mgr/target/release/nbm
+        asset_name: nbm
         asset_content_type: application/octet-stream
 
     - name: Upload Debian Package
