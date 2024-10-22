@@ -1,80 +1,182 @@
-use std::{fs, process::{Command, exit}, env, path::{PathBuf, Path}};
+use std::{env, fs, io::Write, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::{exit, Command}};
 use git2::Repository;
 use reqwest::blocking::Client;
 use std::time::Duration;
 use whoami::fallible;
+use serde_json::Value;
 
-fn main()
-{
-    let mut args: Vec<String> = env::args().collect();
-    args.remove(0); // Program name
+fn main() {
+    let args: Vec<String> = env::args().skip(1).collect();
     let force: bool = args.contains(&"--force".to_string()) || args.contains(&"-f".to_string());
     let do_update: bool = args.contains(&"--update".to_string()) || args.contains(&"-u".to_string());
-    let mut unrecognized_arguments: Vec<String> = vec![];
-    for arg in &args
-    {
-        if arg != "--force" && arg != "-f" && arg != "--update" && arg != "-u"
-        {
-            unrecognized_arguments.push(arg.to_owned());
-        }
-    }
-    if unrecognized_arguments.len() > 0
-    {
-        for un_arg in unrecognized_arguments
-        {
+    let list: bool = args.contains(&"--list".to_string());
+    let set_ver: Option<usize> = args.iter().position(|x| x == "--setver");
+
+    let unrecognized_arguments: Vec<String> = args.iter()
+        .filter(|&arg| !["--force", "-f", "--update", "-u", "--setver", "--list"].contains(&arg.as_str()))
+        .filter(|&arg| set_ver.map_or(true, |i| *arg != args[i + 1]))
+        .cloned()
+        .collect();
+
+    if !unrecognized_arguments.is_empty() {
+        for un_arg in unrecognized_arguments {
             eprintln!("Unrecognized argument: {}", un_arg);
         }
         exit(1);
     }
-    if args.len() < 1 || (!force && !do_update)
-    {
+
+    if args.is_empty() || (!force && !do_update && set_ver.is_none() && !list) {
         println!("You must pass at least one valid argument.");
         exit(1);
-    } else if do_update
-    {
-        if match fallible::username() {
-            Ok(u) => u,  // Remove the &
-            Err(e) => {eprintln!("Could not get username. Received error: {}", e); "user".to_string()}
-        } == "root"        
-        {
-            update(force);
+    } else if list {
+        println!("{}", list_releases().unwrap_or("Failed to list releases".to_string()));
+        return;
+    } else if let Some(set_ver_index) = set_ver {
+        if fallible::username().map(|u| u == "root").unwrap_or(false) {
+            if set_ver_index >= args.len() - 1 {
+                println!("Usage: nbm --setver v<version_number>");
+                return;
+            } else {
+                let version = &args[set_ver_index + 1];
+                if set_version(version) {
+                    println!("Successfully set version to {}", version);
+                } else {
+                    eprintln!("Failed to set version to {}", version);
+                }
+            }
+        } else {
+            eprintln!("To update, you must run nash build manager as root.");
         }
-        else
-        {
+    } else if do_update {
+        if fallible::username().map(|u| u == "root").unwrap_or(false) {
+            update(force);
+        } else {
             eprintln!("To update, you must run nash build manager as root.");
         }
     }
 }
 
-pub fn update(force: bool)
-{
-    if force
-    {
-        update_internal();
+fn list_releases() -> Result<String, Box<dyn std::error::Error>> {
+    let client: Client = Client::new();
+    let url: &str = "https://api.github.com/repos/barely-a-dev/Nash/releases";
+
+    let response = client
+        .get(url)
+        .header("User-Agent", "Nash-GitHub-Release-Checker")
+        .timeout(Duration::from_secs(30))
+        .send()?;
+
+    if !response.status().is_success() {
+        return Err(format!("GitHub API request failed: {}", response.status()).into());
     }
-    else 
-    {
-        let remote_version: String = get_remote_version();
-        let rem_ver: &str = remote_version.trim();
-        let local_version: String = get_local_version();
-        let loc_ver: &str = local_version.trim();
-        if rem_ver == "FAIL"
-        {
-            eprintln!("Could not fetch remote version.");
-            if loc_ver == "FAIL"
-            {
-                println!("Updating anyway as local version check failed.");
-                update_internal();
+
+    let releases: Vec<Value> = response.json()?;
+
+    let release_list: String = releases
+        .iter()
+        .filter_map(|release| release["tag_name"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(release_list)
+}
+
+fn find_release(ver: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    let client: Client = Client::new();
+    let url: &str = "https://api.github.com/repos/barely-a-dev/Nash/releases";
+
+    let response: reqwest::blocking::Response = client
+        .get(url)
+        .header("User-Agent", "Nash-GitHub-Release-Checker")
+        .timeout(Duration::from_secs(30))
+        .send()?;
+
+    if !response.status().is_success() {
+        return Err(format!("GitHub API request failed: {}", response.status()).into());
+    }
+
+    let releases: Vec<Value> = response.json()?;
+
+    Ok(releases.iter().any(|release| {
+        release["tag_name"].as_str().map_or(false, |tag| tag == ver)
+    }))
+}
+
+fn set_version(version: &str) -> bool {
+    match find_release(&version) {
+        Ok(true) => {
+            // Download release's nash and nbm file
+            if let Err(e) = download_release_files(version) {
+                eprintln!("Failed to download release files: {}", e);
+                return false;
             }
-            return;
+
+            // Set permissions and move to /usr/bin/
+            if let Err(e) = install_binaries() {
+                eprintln!("Failed to install binaries: {}", e);
+                return false;
+            }
+
+            true
+        },
+        Ok(false) => {
+            eprintln!("No such release \"{}\"", version);
+            false
+        },
+        Err(e) => {
+            eprintln!("Error checking for release: {}", e);
+            false
         }
-        else if loc_ver != rem_ver
-        {
-            update_internal();
-        }
-        else
-        {
-            eprintln!("No update available and force flag was not specified.");
+    }
+}
+
+fn download_release_files(version: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let client: Client = Client::new();
+    let base_url: String = format!("https://github.com/barely-a-dev/Nash/releases/download/{}", version);
+
+    for binary in &["nash", "nbm"] {
+        let url: String = format!("{}/{}", base_url, binary);
+        let response: reqwest::blocking::Response = client.get(&url).send()?;
+        let content = response.bytes()?;
+
+        let mut file: fs::File = fs::File::create(binary)?;
+        file.write_all(&content)?;
+    }
+
+    Ok(())
+}
+
+fn install_binaries() -> Result<(), Box<dyn std::error::Error>> {
+    for binary in &["nash", "nbm"] {
+        fs::set_permissions(binary, fs::Permissions::from_mode(0o755))?;
+        fs::rename(binary, format!("/usr/bin/{}", binary))?;
+    }
+
+    Ok(())
+}
+
+pub fn update(force: bool) {
+    if force {
+        update_internal();
+    } else {
+        let remote_version: String = get_remote_version();
+        let local_version: String = get_local_version();
+        
+        match (&remote_version[..], &local_version[..]) {
+            ("FAIL", "FAIL") => {
+                println!("Updating anyway as both remote and local version checks failed.");
+                update_internal();
+            },
+            ("FAIL", _) => eprintln!("Could not fetch remote version."),
+            (_, "FAIL") => {
+                println!("Local version check failed. Updating...");
+                update_internal();
+            },
+            (rem_ver, loc_ver) if rem_ver != loc_ver => {
+                println!("Update available. Updating...");
+                update_internal();
+            },
+            _ => eprintln!("No update available and force flag was not specified."),
         }
     }
 }
