@@ -9,6 +9,7 @@ Nash is a simple shell written in Rust, attempting to provide a modern command-l
   - [Prerequisites](#prerequisites)
   - [Manual Installation](#manual-installation)
   - [Automated Installation](#automated-installation)
+  - [Updating](#updating)
 - [Usage](#usage)
   - [Command-line Options](#command-line-options)
   - [Built-in Commands](#built-in-commands)
@@ -50,7 +51,7 @@ Nash is a simple shell written in Rust, attempting to provide a modern command-l
    chmod +x ./install.sh && ./install.sh
    ```
 
-### Automatic Installation
+### Automated Installation
 
 1. Download the build manager from GH:
    ```
