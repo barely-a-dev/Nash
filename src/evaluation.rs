@@ -64,6 +64,7 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobCont
             "bg" => handle_bg(&expanded_cmd_parts, job_control),
             "jobs" => handle_jobs(job_control),
             "pwd" => env::current_dir().unwrap().to_str().unwrap().to_string(),
+            "settings" => handle_settings(conf, &expanded_cmd_parts),
             _ => {
                 // If not a built-in command, execute as an external command
                 let result: String = execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts, internal, job_control);
@@ -82,7 +83,7 @@ pub fn special_eval(state: &mut ShellState, conf: &mut Config , job_control: &mu
 
     for command in commands {
         if command.contains("|") {
-            result = pipe_eval(command);
+            result = pipe_eval(state, conf, job_control, command);
         } else if command.contains(">") {
             result = out_redir_eval(state, conf, job_control, command);
         } else {
@@ -92,50 +93,98 @@ pub fn special_eval(state: &mut ShellState, conf: &mut Config , job_control: &mu
     result
 }
 
-pub fn pipe_eval(cmd: String) -> String {
+pub fn pipe_eval(_state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl, cmd: String) -> String {
     let parts: Vec<String> = cmd.split('|').map(|s| s.trim().to_owned()).collect();
-
     let mut input: String = String::new();
+
     for part in parts {
-        let command_parts: Vec<String> = part.split_whitespace().map(String::from).collect();
-        let command: &String = &command_parts[0];
-        let args: &[String] = &command_parts[1..];
+        let expanded_cmd: String = if part.starts_with('.') { lim_expand(&part) } else { expand(&part) };
+        let cmd_parts: Vec<String> = split_command(&expanded_cmd);
 
-        // Create a command with the input as stdin
-        let mut child: process::Child = match Command::new(command)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            {
-                Ok(c) => c,
-                Err(e) => return format!("An error occurred when running the command to get piped to: {}. Command: \"{}\". Problematic part: \"{}\"", e, cmd, command)
-            };
-
-        // Write the previous command's output to this command's input
-        if !input.is_empty() {
-            let stdin: &mut process::ChildStdin = child.stdin.as_mut().expect("Failed to open stdin");
-            stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+        if cmd_parts.is_empty() {
+            return "Empty command in pipe".to_owned();
         }
 
-        // Get the output of this command
-        let output: process::Output = child.wait_with_output().expect("Failed to read stdout");
+        // Check for environment variable assignment (unlikely in a pipe, but we'll handle it)
+        if cmd_parts[0].contains('=') {
+            return "Environment variable assignment not supported in pipes".to_owned();
+        }
 
-        if output.status.success() {
-            input = String::from_utf8_lossy(&output.stdout).into_owned();
+        // Load aliases
+        let alias_file_path: PathBuf = get_alias_file_path();
+        let aliases: HashMap<String, String> = load_aliases(&alias_file_path);
+
+        // Check for alias and expand if found
+        let expanded_cmd_parts: Vec<String> = if let Some(alias_cmd) = aliases.get(&cmd_parts[0]) {
+            let mut new_cmd_parts: Vec<String> = alias_cmd.split_whitespace().map(String::from).collect();
+            new_cmd_parts.extend_from_slice(&cmd_parts[1..]);
+            new_cmd_parts
         } else {
-            let erro: std::borrow::Cow<'_, str> = String::from_utf8_lossy(&output.stderr);
-            if !erro.is_empty() {
-                return format!("Command failed and output error: {}", String::from_utf8_lossy(&output.stderr));
+            cmd_parts
+        };
+
+        let result = if expanded_cmd_parts[0].as_str().starts_with('.') {
+            execute_file(&part[1..], &expanded_cmd_parts[1..])
+        } else {
+            match expanded_cmd_parts[0].as_str() {
+                "cd" => handle_cd(&expanded_cmd_parts),
+                "history" => handle_history(&expanded_cmd_parts),
+                "alias" => handle_alias(&expanded_cmd_parts),
+                "rmalias" => handle_remove_alias(&expanded_cmd_parts),
+                "help" => show_help(),
+                "set" => set_conf_rule(conf, &expanded_cmd_parts),
+                "unset" => unset_conf_rule(conf, &expanded_cmd_parts),
+                "rconf" => read_conf(conf, &expanded_cmd_parts),
+                "jobs" => handle_jobs(job_control),
+                "pwd" => env::current_dir().unwrap().to_str().unwrap().to_string(),
+                "settings" => handle_settings(conf, &expanded_cmd_parts),
+                "exit" | "reset" | "fg" | "bg" | "summon" => {
+                    return format!("Command '{}' is not supported in pipes", expanded_cmd_parts[0]);
+                }
+                _ => {
+                    // If not a built-in command, execute as an external command
+                    let mut child: process::Child = match Command::new(&expanded_cmd_parts[0])
+                        .args(&expanded_cmd_parts[1..])
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .spawn()
+                    {
+                        Ok(child) => child,
+                        Err(e) => {
+                            return format!("Failed to execute command: {}", e);
+                        }
+                    };
+
+                    if !input.is_empty() {
+                        match child.stdin.as_mut() {
+                            Some(stdin) => {
+                                if let Err(e) = stdin.write_all(input.as_bytes()) {
+                                    return format!("Failed to write to stdin: {}", e);
+                                }
+                            },
+                            None => {
+                                return "Failed to open stdin".to_string();
+                            }
+                        }
+                    }
+
+                    let output = child.wait_with_output().expect("Failed to read stdout");
+                    if output.status.success() {
+                        String::from_utf8_lossy(&output.stdout).into_owned()
+                    } else {
+                        return format!("Command failed: {}", String::from_utf8_lossy(&output.stderr));
+                    }
+                }
             }
-            return NO_RESULT.to_owned();
-        }
+        };
+
+        input = result;
     }
 
     input
 }
 
-pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl, cmd: String) -> String {
+pub fn out_redir_eval(_state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl, cmd: String) -> String {
     let parts: Vec<String> = if cmd.contains("2>>") {
         cmd.splitn(2, "2>>").map(|s| s.trim().to_owned()).collect()
     } else if cmd.contains(">>") {
@@ -154,6 +203,56 @@ pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, job_control: &m
     let file_path: String = parts[1].clone();
     let append_mode: bool = cmd.contains(">>");
 
+    let expanded_cmd: String = if command.starts_with('.') { lim_expand(&command) } else { expand(&command) };
+    let cmd_parts: Vec<String> = split_command(&expanded_cmd);
+
+    if cmd_parts.is_empty() {
+        return "Empty command".to_owned();
+    }
+
+    // Check if the first part is an environment variable assignment
+    if cmd_parts[0].contains('=') {
+        return "Environment variable assignment not supported with output redirection".to_owned();
+    }
+
+    // Load aliases
+    let alias_file_path: PathBuf = get_alias_file_path();
+    let aliases: HashMap<String, String> = load_aliases(&alias_file_path);
+
+    // Check for alias and expand if found
+    let expanded_cmd_parts: Vec<String> = if let Some(alias_cmd) = aliases.get(&cmd_parts[0]) {
+        let mut new_cmd_parts: Vec<String> = alias_cmd.split_whitespace().map(String::from).collect();
+        new_cmd_parts.extend_from_slice(&cmd_parts[1..]);
+        new_cmd_parts
+    } else {
+        cmd_parts
+    };
+
+    let output: String = if expanded_cmd_parts[0].as_str().starts_with('.') {
+        execute_file(&command[1..], &expanded_cmd_parts[1..])
+    } else {
+        match expanded_cmd_parts[0].as_str() {
+            "cd" => handle_cd(&expanded_cmd_parts),
+            "history" => handle_history(&expanded_cmd_parts),
+            "alias" => handle_alias(&expanded_cmd_parts),
+            "rmalias" => handle_remove_alias(&expanded_cmd_parts),
+            "help" => show_help(),
+            "set" => set_conf_rule(conf, &expanded_cmd_parts),
+            "unset" => unset_conf_rule(conf, &expanded_cmd_parts),
+            "rconf" => read_conf(conf, &expanded_cmd_parts),
+            "jobs" => handle_jobs(job_control),
+            "pwd" => env::current_dir().unwrap().to_str().unwrap().to_string(),
+            "settings" => handle_settings(conf, &expanded_cmd_parts),
+            "exit" | "reset" | "fg" | "bg" | "summon" => {
+                return format!("Command '{}' is not supported with output redirection", expanded_cmd_parts[0]);
+            }
+            _ => {
+                // If not a built-in command, execute as an external command
+                execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts, true, job_control)
+            }
+        }
+    };
+
     let mut file_options: OpenOptions = OpenOptions::new();
     file_options.write(true).create(true);
     if append_mode {
@@ -164,7 +263,6 @@ pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, job_control: &m
 
     match file_options.open(&file_path) {
         Ok(mut file) => {
-            let output: String = eval(state, conf, job_control, command, false);
             match file.write_all(output.as_bytes()) {
                 Ok(_) => NO_RESULT.to_owned(),
                 Err(e) => format!("Failed to write to file: {}", e),
@@ -175,7 +273,6 @@ pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, job_control: &m
 }
 
 pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool, job_control: &mut JobControl) -> String {
-    println!("DEBUG:\n cmd:\n  {}\n parts:\n  {:#?}", cmd, cmd_parts);
     match find_command_in_path(cmd) {
         Some(path) => {
             let mut command = Command::new(path);

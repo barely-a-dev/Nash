@@ -2,7 +2,7 @@ use crate::globals::*;
 use crate::helpers::*;
 use crate::jobs::JobControl;
 use std::env;
-use std::{path::PathBuf, fs::{self, remove_file, File}, io::Error, collections::HashMap, process::{self, Stdio, Command, exit}};
+use std::{path::PathBuf, fs::{self, remove_file, File}, io::Error, collections::HashMap, process::{self, Stdio, Command}};
 use crate::arguments::*;
 use crate::config::*;
 use crate::jobs::JobStatus;
@@ -13,42 +13,39 @@ pub fn reset(conf: &mut Config, nash_dir: PathBuf) -> String
     conf.temp_rules = HashMap::new();
     env::set_current_dir("/").unwrap();
 
-    match conf.get_rule("delete_on_reset", true)
-    {
-        None =>
-        {
-            match File::create(nash_dir.join("config"))
-            {
-                Ok(_) => println!("Successfully erased config."),
-                Err(e) => eprintln!("Could not erase config. Error: {}", e)
+    let mut output = String::new();
+
+    match conf.get_rule("delete_on_reset", true) {
+        None => {
+            match File::create(nash_dir.join("config")) {
+                Ok(_) => output.push_str("Successfully erased config.\n"),
+                Err(e) => output.push_str(&format!("Could not erase config. Error: {}\n", e))
             }
-            match File::create(nash_dir.join("history"))
-            {
-                Ok(_) => println!("Successfully erased history."),
-                Err(e) => eprintln!("Could not erase history. Error: {}", e)
+            match File::create(nash_dir.join("history")) {
+                Ok(_) => output.push_str("Successfully erased history.\n"),
+                Err(e) => output.push_str(&format!("Could not erase history. Error: {}\n", e))
             }
-            match File::create(nash_dir.join("alias"))
-            {
-                Ok(_) => println!("Successfully erased aliases."),
-                Err(e) => eprintln!("Could not erase aliases. Error: {}", e)
+            match File::create(nash_dir.join("alias")) {
+                Ok(_) => output.push_str("Successfully erased aliases.\n"),
+                Err(e) => output.push_str(&format!("Could not erase aliases. Error: {}\n", e))
             }
         }
-        Some(v) =>
-        {
+        Some(v) => {
             if v.parse::<bool>().unwrap_or(false) {
                 let nash_dir_disp: String = nash_dir.display().to_string();
                 match remove_file("/usr/bin/nash") {
-                    Ok(_) => println!("Successfully deleted /usr/bin/nash."),
-                    Err(e) => eprintln!("Could not delete /usr/bin/nash file. Error: {}", e)
+                    Ok(_) => output.push_str("Successfully deleted /usr/bin/nash.\n"),
+                    Err(e) => output.push_str(&format!("Could not delete /usr/bin/nash file. Error: {}\n", e))
                 }
                 match fs::remove_dir_all(&nash_dir) {
-                    Ok(_) => println!("Successfully deleted {}.", nash_dir_disp),
-                    Err(e) => eprintln!("Could not delete {} directory. Error: {}", nash_dir_disp, e)
+                    Ok(_) => output.push_str(&format!("Successfully deleted {}.\n", nash_dir_disp)),
+                    Err(e) => output.push_str(&format!("Could not delete {} directory. Error: {}\n", nash_dir_disp, e))
                 }
             }            
         }
     }
-    exit(1000);
+    output.push_str("Exiting...\n");
+    output
 }
 
 pub fn show_help() -> String {
@@ -62,159 +59,171 @@ pub fn show_help() -> String {
      set <<<option> <value>>/<flag>>: Set a config rule to true or value\n\
      unset <option> <temp(bool)>: Unset a config rule (unimplemented)\n\
      reset: Reset the application, erase if delete_on_reset rule is true\n\
-     rconf <option> [temp(bool)]: Read the value of a config rule (unimplemented)".to_owned()
+     rconf <option> [temp(bool)]: Read the value of a config rule (unimplemented)\n\
+     settings: Display a simple config menu".to_owned()
 }
 
+pub fn handle_settings(conf: &mut Config, cmd_parts: &[String]) -> String {
+    let (_, flag_args) = parse_args(cmd_parts);
+    let temp: bool = flag_args.contains_key("temp") || flag_args.contains_key("t");
+    let settings: Vec<GUIEntry> = vec![
+        GUIEntry::new("error", "bool", &conf.get_rule("error", false).unwrap_or("false")),
+        GUIEntry::new("delete_on_reset", "bool", &conf.get_rule("delete_on_reset", false).unwrap_or("false")),
+    ];
+
+    let mut menu: GUIMenu = GUIMenu::new("Nash settings".to_string(), settings);
+    
+    match menu.run() {
+        Ok(_) => {
+            for entry in menu.entries.iter() {
+                conf.set_rule(&entry.name, &entry.value, false);
+            }
+            if !temp
+            {
+                conf.save_rules();
+            }
+            "Settings updated successfully".to_owned()
+        }
+        Err(e) => format!("Error in settings menu: {}", e),
+    }
+}
+// TODO: fix arguments. Currently they are entirely removed, but ones past the program name should be kept. May require a new parse_summon_args() function due to its unique nature
 pub fn handle_summon(cmd_parts: &[String]) -> String {
     let (main_args, flag_args) = parse_args(cmd_parts);
     let wait_for_exit: bool = flag_args.contains_key("w");
+    let mut output = String::new();
     
     if main_args.len() < 1 {
         return "Usage: summon [-w] <command>".to_owned();
     }
 
     let executable: &String = &main_args[0];
-    let args: Vec<&String> = main_args.iter().skip(2).collect();
+    let args: Vec<&String> = main_args.iter().skip(1).collect();
 
-                // List of common terminal emulators
-                let terminals: Vec<&str> = vec![
-                    "x-terminal-emulator",
-                    "gnome-terminal",
-                    "konsole",
-                    "xterm",
-                    "urxvt",
-                    "alacritty",
-                    "warp",
-                    "termux",
-                    "qterminal",
-                    "kitty",
-                    "tilix",
-                    "terminator",
-                    "rxvt",
-                    "st",
-                    "terminology",
-                    "hyper",
-                    "iterm2",
-                ];
-        
-                let mut installed_terminals: Vec<&str> = Vec::new();
-        
-                // Check for installed terminals
-                for &terminal in &terminals {
-                    if let Ok(output) = Command::new("which").arg(terminal).output() {
-                        if !output.stdout.is_empty() {
-                            installed_terminals.push(terminal);
-                            println!("Found terminal: {}", terminal);
-                        }
-                    }
-                }
-        
-                // No terminal :(
-                if installed_terminals.is_empty() {
-                    eprintln!("Unable to find a suitable terminal emulator");
-                    return NO_RESULT.to_owned();
-                }
-        
-                // Use the first installed terminal in the list
-                let terminal: &str = &installed_terminals[0];
-                println!("Using terminal: {}", terminal);
-                
+    // List of common terminal emulators
+    let terminals: Vec<&str> = vec![
+        "x-terminal-emulator", "gnome-terminal", "konsole", "xterm", "urxvt", "alacritty",
+        "warp", "termux", "qterminal", "kitty", "tilix", "terminator", "rxvt", "st",
+        "terminology", "hyper", "iterm2",
+    ];
 
-        let result: Result<process::Child, Error> = match terminal {
-            "gnome-terminal" => {
-                let mut cmd: Vec<&str> = vec!["bash", "-c", executable];
-                cmd.extend(args.iter().map(|s| s.as_str()));
-                println!("Executing: {} -- {} {:?}", terminal, cmd.join(" "), cmd);
-                Command::new(terminal)
-                    .args(&["--"])
-                    .args(&cmd)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-            },
-            "warp" => {
-                let mut cmd: Vec<&str> = vec![executable.as_str()];
-                cmd.extend(args.iter().map(|s| s.as_str()));
-                println!("Executing: {} --cmd {} {:?}", terminal, cmd.join(" "), cmd);
-                Command::new(terminal)
-                    .arg("--cmd")
-                    .args(&cmd)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-            },
-            "termux" => {
-                let mut cmd: Vec<&str> = vec![executable.as_str()];
-                cmd.extend(args.iter().map(|s| s.as_str()));
-                println!("Executing: {} -e {} {:?}", terminal, cmd.join(" "), cmd);
-                Command::new(terminal)
-                    .arg("-e")
-                    .args(&cmd)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-            },
-            _ => {
-                let mut cmd: Vec<&str> = vec![executable.as_str()];
-                cmd.extend(args.iter().map(|s| s.as_str()));
-                println!("Executing: {} -e {} {:?}", terminal, cmd.join(" "), cmd);
-                Command::new(terminal)
-                    .arg("-e")
-                    .args(&cmd)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-            },
-        };
+    let mut installed_terminals: Vec<&str> = Vec::new();
 
-        match result {
-            Ok(mut child) => {
-                if wait_for_exit {
-                    match child.wait() {
-                        Ok(status) => return format!("Process exited with status: {}", status),
-                        Err(e) => return format!("Error waiting for process: {}", e),
-                    }
-                } else {
-                    return child.id().to_string()
-                }
-            },
-            Err(e) => return format!("An error occurred: {} (Command: {})", e, executable),
+    // Check for installed terminals
+    for &terminal in &terminals {
+        if let Ok(term_output) = Command::new("which").arg(terminal).output() {
+            if !term_output.stdout.is_empty() {
+                installed_terminals.push(terminal);
+                output.push_str(&format!("Found terminal: {}\n", terminal));
+            }
         }
+    }
+
+    // No terminal :(
+    if installed_terminals.is_empty() {
+        return "Unable to find a suitable terminal emulator".to_owned();
+    }
+
+    // Use the first installed terminal in the list
+    let terminal: &str = &installed_terminals[0];
+    output.push_str(&format!("Using terminal: {}\n", terminal));
+
+    let result: Result<process::Child, Error> = match terminal {
+        "gnome-terminal" => {
+            let mut cmd: Vec<&str> = vec!["bash", "-c", executable];
+            cmd.extend(args.iter().map(|s| s.as_str()));
+            output.push_str(&format!("Executing: {} -- {} {:?}\n", terminal, cmd.join(" "), cmd));
+            Command::new(terminal)
+                .args(&["--"])
+                .args(&cmd)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        },
+        "warp" => {
+            let mut cmd: Vec<&str> = vec![executable.as_str()];
+            cmd.extend(args.iter().map(|s| s.as_str()));
+            output.push_str(&format!("Executing: {} --cmd {} {:?}\n", terminal, cmd.join(" "), cmd));
+            Command::new(terminal)
+                .arg("--cmd")
+                .args(&cmd)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        },
+        "termux" => {
+            let mut cmd: Vec<&str> = vec![executable.as_str()];
+            cmd.extend(args.iter().map(|s| s.as_str()));
+            output.push_str(&format!("Executing: {} -e {} {:?}\n", terminal, cmd.join(" "), cmd));
+            Command::new(terminal)
+                .arg("-e")
+                .args(&cmd)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        },
+        _ => {
+            let mut cmd: Vec<&str> = vec![executable.as_str()];
+            cmd.extend(args.iter().map(|s| s.as_str()));
+            output.push_str(&format!("Executing: {} -e {} {:?}\n", terminal, cmd.join(" "), cmd));
+            Command::new(terminal)
+                .arg("-e")
+                .args(&cmd)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        },
+    };
+
+    match result {
+        Ok(mut child) => {
+            if wait_for_exit {
+                match child.wait() {
+                    Ok(status) => output.push_str(&format!("Process exited with status: {}\n", status)),
+                    Err(e) => output.push_str(&format!("Error waiting for process: {}\n", e)),
+                }
+            } else {
+                output.push_str(&format!("Process started with PID: {}\n", child.id()))
+            }
+        },
+        Err(e) => output.push_str(&format!("An error occurred: {} (Command: {})\n", e, executable)),
+    }
+
+    output
 }
 
 pub fn handle_history(cmd: &[String]) -> String {
     let (_, flag_args) = parse_args(cmd);
     let size: bool = flag_args.contains_key("size") || flag_args.contains_key("s");
     let clear: bool = flag_args.contains_key("clear") || flag_args.contains_key("c");
+    let mut output = String::new();
+
     if !size && !clear {
         let history_file: PathBuf = get_history_file_path();
         match fs::read_to_string(history_file) {
             Ok(contents) => {
                 for (i, line) in contents.lines().enumerate() {
-                    println!("{}: {}", i + 1, line);
+                    output.push_str(&format!("{}: {}\n", i + 1, line));
                 }
-                NO_RESULT.to_owned()
             }
-            Err(e) => format!("Failed to read history: {}", e),
+            Err(e) => output.push_str(&format!("Failed to read history: {}\n", e)),
         }
     } else {
-        let mut out: String = String::new();
         if size {
-            out.push_str(&format!("History file size: {}\n", get_history_file_path().metadata().unwrap().len()));
+            output.push_str(&format!("History file size: {}\n", get_history_file_path().metadata().unwrap().len()));
         }
         if clear {
-            match File::create(get_history_file_path())
-            {
-                Ok(_) => out.push_str("Successfully cleared history\n"),
-                Err(e) => out.push_str(&format!("Could not clear history. Recieved error: {}\n", e))
+            match File::create(get_history_file_path()) {
+                Ok(_) => output.push_str("Successfully cleared history\n"),
+                Err(e) => output.push_str(&format!("Could not clear history. Received error: {}\n", e))
             };
         }
-        return out;
     }
+    output
 }
 
 pub fn handle_alias(cmd_parts: &[String]) -> String {

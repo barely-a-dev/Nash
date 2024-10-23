@@ -54,7 +54,7 @@ Nash is a simple shell written in Rust, attempting to provide a modern command-l
 
 1. Download the build manager from GH:
    ```
-   curl -L https://github.com/barely-a-dev/Nash/releases/download/v0.0.9.6.2/nbm -o nbm
+   curl -L https://github.com/barely-a-dev/Nash/releases/download/<VERSION>/nbm -o nbm
    ```
 2. Make it executable:
    ```
@@ -123,6 +123,7 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
 - reset: Reset the application, erase if delete_on_reset rule is true
 - rconf <option> [temp(bool)]: Read the value of a config rule (unimplemented)
 - help: Display a help menu
+- settings: Display a simple config menu
 
 ### Special Features
 
@@ -133,7 +134,7 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
 
 ## Development Status
 
-Nash is currently in early development (v0.0.9.6.3). While it's functional for basic use, many features are still being implemented or improved.
+Nash is currently in early development (v0.0.9.7). While it's functional for basic use, many features are still being implemented or improved.
 
 ## Contributing
 

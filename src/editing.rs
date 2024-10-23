@@ -34,7 +34,8 @@ impl AutoCompleter {
             "set".to_string(),
             "unset".to_string(),
             "rconf".to_string(),
-            "reset".to_string()
+            "reset".to_string(),
+            "settings".to_string()
             // More built-in commands here
         ];
 
