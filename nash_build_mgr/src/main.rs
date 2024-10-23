@@ -25,6 +25,15 @@ fn main() {
         exit(1);
     }
 
+    // Check if Rust is installed
+    match Command::new("rustc").arg("--version").output() {
+        Ok(_) => {},
+        Err(_) => {
+            eprintln!("Rust is not installed. Please install Rust.");
+            exit(1);
+        }
+    }
+
     if args.is_empty() || (!force && !do_update && set_ver.is_none() && !list) {
         println!("You must pass at least one valid argument.");
         exit(1);
