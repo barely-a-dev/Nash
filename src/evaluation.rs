@@ -1,11 +1,10 @@
 use crate::config::*;
 use crate::globals::*;
 use crate::commands::*;
-use crate::helpers::*;
 use crate::command_parsing::*;
 use crate::jobs::{JobControl, JobStatus};
 use std::process::{self, Stdio, Command};
-use std::{fs::OpenOptions, io::{Write, Error}, env, path::PathBuf, collections::HashMap, os::unix::process::CommandExt};
+use std::{fs::OpenOptions, io::{Write, Error}, env, path::PathBuf, os::unix::process::CommandExt};
 
 pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl, cmd: String, internal: bool) -> String {
     let chars_to_check: [char; 3] = [';', '|', '>'];
@@ -22,18 +21,7 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobCont
         return env_var_eval(job_control, cmd_parts[0].clone());
     }
 
-    // Load aliases
-    let alias_file_path: PathBuf = get_alias_file_path();
-    let aliases: HashMap<String, String> = load_aliases(&alias_file_path);
-
-    // Check for alias and expand if found
-    let expanded_cmd_parts: Vec<String> = if let Some(alias_cmd) = aliases.get(&cmd_parts[0]) {
-        let mut new_cmd_parts: Vec<String> = alias_cmd.split_whitespace().map(String::from).collect();
-        new_cmd_parts.extend_from_slice(&cmd_parts[1..]);
-        new_cmd_parts
-    } else {
-        cmd_parts
-    };
+    let expanded_cmd_parts: Vec<String> = expand_aliases(cmd_parts);
 
     if cmd.contains(|c| chars_to_check.contains(&c)) {
         return special_eval(state, conf, job_control, expanded_cmd_parts.join(" "));
@@ -51,7 +39,7 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobCont
                 println!("Exiting...");
                 process::exit(0);
             }
-            // TODO: Allow creation of aliases to files, IE alias kill='./pkill' and summonning of current directory files IE summon ./pkill
+            // TODO: Allow summonning of current directory files IE summon ./pkill
             "summon" => handle_summon(&expanded_cmd_parts),
             "alias" => handle_alias(&expanded_cmd_parts),
             "rmalias" => handle_remove_alias(&expanded_cmd_parts),
@@ -110,18 +98,7 @@ pub fn pipe_eval(_state: &mut ShellState, conf: &mut Config, job_control: &mut J
             return "Environment variable assignment not supported in pipes".to_owned();
         }
 
-        // Load aliases
-        let alias_file_path: PathBuf = get_alias_file_path();
-        let aliases: HashMap<String, String> = load_aliases(&alias_file_path);
-
-        // Check for alias and expand if found
-        let expanded_cmd_parts: Vec<String> = if let Some(alias_cmd) = aliases.get(&cmd_parts[0]) {
-            let mut new_cmd_parts: Vec<String> = alias_cmd.split_whitespace().map(String::from).collect();
-            new_cmd_parts.extend_from_slice(&cmd_parts[1..]);
-            new_cmd_parts
-        } else {
-            cmd_parts
-        };
+        let expanded_cmd_parts: Vec<String> = expand_aliases(cmd_parts);
 
         let result = if expanded_cmd_parts[0].as_str().starts_with('.') {
             execute_file(&part[1..], &expanded_cmd_parts[1..])
@@ -215,18 +192,7 @@ pub fn out_redir_eval(_state: &mut ShellState, conf: &mut Config, job_control: &
         return "Environment variable assignment not supported with output redirection".to_owned();
     }
 
-    // Load aliases
-    let alias_file_path: PathBuf = get_alias_file_path();
-    let aliases: HashMap<String, String> = load_aliases(&alias_file_path);
-
-    // Check for alias and expand if found
-    let expanded_cmd_parts: Vec<String> = if let Some(alias_cmd) = aliases.get(&cmd_parts[0]) {
-        let mut new_cmd_parts: Vec<String> = alias_cmd.split_whitespace().map(String::from).collect();
-        new_cmd_parts.extend_from_slice(&cmd_parts[1..]);
-        new_cmd_parts
-    } else {
-        cmd_parts
-    };
+    let expanded_cmd_parts: Vec<String> = expand_aliases(cmd_parts);
 
     let output: String = if expanded_cmd_parts[0].as_str().starts_with('.') {
         execute_file(&command[1..], &expanded_cmd_parts[1..])

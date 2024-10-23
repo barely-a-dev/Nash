@@ -6,6 +6,7 @@ use std::{path::PathBuf, fs::{self, remove_file, File}, io::Error, collections::
 use crate::arguments::*;
 use crate::config::*;
 use crate::jobs::JobStatus;
+use crate::command_parsing::expand;
 
 pub fn reset(conf: &mut Config, nash_dir: PathBuf) -> String
 {
@@ -87,18 +88,16 @@ pub fn handle_settings(conf: &mut Config, cmd_parts: &[String]) -> String {
         Err(e) => format!("Error in settings menu: {}", e),
     }
 }
-// TODO: fix arguments. Currently they are entirely removed, but ones past the program name should be kept. May require a new parse_summon_args() function due to its unique nature
 pub fn handle_summon(cmd_parts: &[String]) -> String {
-    let (main_args, flag_args) = parse_args(cmd_parts);
+    let (main_args, flag_args) = parse_summon_args(cmd_parts);
     let wait_for_exit: bool = flag_args.contains_key("w");
     let mut output = String::new();
     
-    if main_args.len() < 1 {
+    if main_args.is_empty() {
         return "Usage: summon [-w] <command>".to_owned();
     }
 
     let executable: &String = &main_args[0];
-    let args: Vec<&String> = main_args.iter().skip(1).collect();
 
     // List of common terminal emulators
     let terminals: Vec<&str> = vec![
@@ -130,8 +129,8 @@ pub fn handle_summon(cmd_parts: &[String]) -> String {
 
     let result: Result<process::Child, Error> = match terminal {
         "gnome-terminal" => {
-            let mut cmd: Vec<&str> = vec!["bash", "-c", executable];
-            cmd.extend(args.iter().map(|s| s.as_str()));
+            let mut cmd: Vec<&str> = vec!["bash", "-c"];
+            cmd.extend(main_args.iter().map(|s| s.as_str()));
             output.push_str(&format!("Executing: {} -- {} {:?}\n", terminal, cmd.join(" "), cmd));
             Command::new(terminal)
                 .args(&["--"])
@@ -142,36 +141,30 @@ pub fn handle_summon(cmd_parts: &[String]) -> String {
                 .spawn()
         },
         "warp" => {
-            let mut cmd: Vec<&str> = vec![executable.as_str()];
-            cmd.extend(args.iter().map(|s| s.as_str()));
-            output.push_str(&format!("Executing: {} --cmd {} {:?}\n", terminal, cmd.join(" "), cmd));
+            output.push_str(&format!("Executing: {} --cmd {} {:?}\n", terminal, main_args.join(" "), main_args));
             Command::new(terminal)
                 .arg("--cmd")
-                .args(&cmd)
+                .args(&main_args)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
         },
         "termux" => {
-            let mut cmd: Vec<&str> = vec![executable.as_str()];
-            cmd.extend(args.iter().map(|s| s.as_str()));
-            output.push_str(&format!("Executing: {} -e {} {:?}\n", terminal, cmd.join(" "), cmd));
+            output.push_str(&format!("Executing: {} -e {} {:?}\n", terminal, main_args.join(" "), main_args));
             Command::new(terminal)
                 .arg("-e")
-                .args(&cmd)
+                .args(&main_args)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
         },
         _ => {
-            let mut cmd: Vec<&str> = vec![executable.as_str()];
-            cmd.extend(args.iter().map(|s| s.as_str()));
-            output.push_str(&format!("Executing: {} -e {} {:?}\n", terminal, cmd.join(" "), cmd));
+            output.push_str(&format!("Executing: {} -e {} {:?}\n", terminal, main_args.join(" "), main_args));
             Command::new(terminal)
                 .arg("-e")
-                .args(&cmd)
+                .args(&main_args)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -200,7 +193,7 @@ pub fn handle_history(cmd: &[String]) -> String {
     let (_, flag_args) = parse_args(cmd);
     let size: bool = flag_args.contains_key("size") || flag_args.contains_key("s");
     let clear: bool = flag_args.contains_key("clear") || flag_args.contains_key("c");
-    let mut output = String::new();
+    let mut output: String = String::new();
 
     if !size && !clear {
         let history_file: PathBuf = get_history_file_path();
@@ -244,7 +237,7 @@ pub fn handle_alias(cmd_parts: &[String]) -> String {
         if let Some(pos) = alias_str.find('=') {
             let (name, command) = alias_str.split_at(pos);
             let name: &str = name.trim();
-            let command: &str = command[1..].trim().trim_matches('\'').trim_matches('"');
+            let command: &str = &expand(command[1..].trim().trim_matches('\'').trim_matches('"'));
             aliases.insert(name.to_string(), command.to_string());
             save_aliases(&alias_file_path, &aliases);
             return format!("Alias '{}' created.", name);

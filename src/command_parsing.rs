@@ -1,4 +1,5 @@
-use std::{env, borrow::Cow, path::{Path, PathBuf}};
+use std::{env, borrow::Cow, path::{Path, PathBuf}, collections::HashMap};
+use crate::helpers::{load_aliases, get_alias_file_path};
 
 pub fn split_command(cmd: &str) -> Vec<String> {
     let mut result: Vec<String> = Vec::new();
@@ -44,6 +45,22 @@ pub fn expand(cmd: &str) -> String {
 
 pub fn lim_expand(cmd: &str) -> String {
     expand_env_vars(&expand_home(cmd).to_string())
+}
+
+pub fn expand_aliases(cmd_parts: Vec<String>) -> Vec<String>
+{
+    // Load aliases
+    let alias_file_path: PathBuf = get_alias_file_path();
+    let aliases: HashMap<String, String> = load_aliases(&alias_file_path);
+
+    // Check for alias and expand if found
+    return if let Some(alias_cmd) = aliases.get(&cmd_parts[0]) {
+        let mut new_cmd_parts: Vec<String> = alias_cmd.split_whitespace().map(String::from).collect();
+        new_cmd_parts.extend_from_slice(&cmd_parts[1..]);
+        new_cmd_parts
+    } else {
+        cmd_parts
+    };
 }
 
 pub fn expand_dots(cmd: &str) -> String {

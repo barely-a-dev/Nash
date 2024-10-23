@@ -1,6 +1,7 @@
 // Important TODOs: Fix updating, which evidently never worked
 // MAJOR TODOs: export for env vars; wildcards/regex (*, ?, []), job control; prompt customization with PS1, PS2, etc.
 // HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables); [[ expression ]] and (( expression ))
+// TODO: Make a history limit, that erases the oldest history entry for each command.
 pub mod editing;
 pub mod config;
 pub mod arguments;
@@ -13,7 +14,6 @@ pub mod jobs;
 
 #[cfg(feature = "use-libc")]
 extern crate libc;
-
 
 use crate::editing::{CommandHinter, AutoCompleter, LineHighlighter};
 use crate::config::Config;
@@ -245,7 +245,7 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
 
     // Handle other command-line arguments
     if version {
-        println!("v0.0.9.7");
+        println!("v0.0.9.7.1");
         return;
     }
 

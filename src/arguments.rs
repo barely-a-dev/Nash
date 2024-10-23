@@ -57,3 +57,20 @@ pub fn parse_arg_vec(args: &Vec<String>) -> (Vec<String>, HashMap<String, Option
     
     return parse_args(arg_array);
 }
+
+pub fn parse_summon_args(args: &[String]) -> (Vec<String>, HashMap<String, Option<String>>) {
+    let mut parsed_args: HashMap<String, Option<String>> = HashMap::new();
+    let mut command_args: Vec<String> = Vec::new();
+    let mut i: usize = 1; // Start from 1 to skip the program name (summon)
+
+    // Check for the -w flag
+    if args.len() > 1 && args[1] == "-w" {
+        parsed_args.insert("w".to_string(), None);
+        i = 2;
+    }
+
+    // Collect all remaining arguments as the command to be executed
+    command_args.extend_from_slice(&args[i..]);
+
+    (command_args, parsed_args)
+}

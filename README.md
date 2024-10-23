@@ -135,7 +135,7 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
 
 ## Development Status
 
-Nash is currently in early development (v0.0.9.7). While it's functional for basic use, many features are still being implemented or improved.
+Nash is currently in early development (v0.0.9.7.1). While it's functional for basic use, many features are still being implemented or improved.
 
 ## Contributing
 
