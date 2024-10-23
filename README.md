@@ -63,7 +63,7 @@ Nash is a simple shell written in Rust, attempting to provide a modern command-l
    ```
 3. Install nash:
    ```
-   nbm --setver recent
+   sudo ./nbm --setver recent
    ```
    (or any version instead of recent, IE v0.0.9, or --update)
 4. Remove the initial installer:
