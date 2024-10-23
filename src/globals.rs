@@ -10,7 +10,8 @@ use termion::clear;
 
 pub struct ShellState {
     pub username: String,
-    pub hostname: String
+    pub hostname: String,
+    pub history_limit: usize
 }
 pub const NO_RESULT: &str = "";
 

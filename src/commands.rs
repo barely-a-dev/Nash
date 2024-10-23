@@ -63,6 +63,11 @@ pub fn show_help() -> String {
      rconf <option> [temp(bool)]: Read the value of a config rule (unimplemented)\n\
      settings: Display a simple config menu".to_owned()
 }
+#[allow(unused_variables)]
+pub fn test_nash(conf: &mut Config, state: &mut ShellState, job_control: &mut JobControl, cmd: &[String]) -> String
+{
+    "TEST isn't implemented or documented. Why did you run it?".to_string()
+}
 
 pub fn handle_settings(conf: &mut Config, cmd_parts: &[String]) -> String {
     let (_, flag_args) = parse_args(cmd_parts);

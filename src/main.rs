@@ -20,6 +20,7 @@ use crate::evaluation::eval;
 use crate::globals::ShellState;
 use crate::helpers::get_history_file_path;
 use arguments::parse_arg_vec;
+use dirs::home_dir;
 use crate::jobs::{JobControl, RECEIVED_SIGTSTP, setup_signal_handlers};
 use rustyline::{
     completion::{Completer, Pair},
@@ -33,7 +34,8 @@ use rustyline_derive::Helper;
 use std::{
     borrow::Cow,
     env,
-    fs,
+    fs::{self, File},
+    io::{BufReader, BufRead, Write},
     path::{Path, PathBuf},
     process::{exit, Command},
     sync::atomic::Ordering
@@ -49,9 +51,16 @@ fn main() {
         Ok(c) => c,
         Err(_) => {eprintln!("An error occurred when initializing the config."); exit(1)}
     };
+    let config_file: PathBuf = PathBuf::from(format!("{}/.nash/config", home_dir().unwrap().to_str().unwrap()));
+    if File::open(config_file).unwrap().metadata().unwrap().len() < 1
+    {
+        conf.set_rule("hist_size", "500", false);
+        conf.save_rules();
+    }
     let mut state: ShellState = ShellState {
         hostname: fallible::hostname().unwrap(),
         username: fallible::username().unwrap(),
+        history_limit: conf.get_rule("hist_size", false).unwrap_or("500").trim_start_matches('-').parse::<usize>().unwrap_or(500)
     };
     let job_control: &mut JobControl = &mut JobControl::new();
     env::set_var("IV", eval(&mut state, &mut conf, job_control, "SHELL=/usr/bin/nash".to_owned(), true));
@@ -161,7 +170,22 @@ fn repl(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl)
 
         match rl.readline(&prompt) {
             Ok(line) => {
-                rl.add_history_entry(line.as_str());
+                if rl.history().len() >= state.history_limit {
+                    let temp_file: PathBuf = history_file.with_extension("temp");
+                    {
+                        let input: File = File::open(&history_file).unwrap();
+                        let reader = BufReader::new(input);
+                        let mut output: File = File::create(&temp_file).unwrap();
+                
+                        for (index, line) in reader.lines().enumerate() {
+                            if index != 0 {  // Skip the first line
+                                writeln!(output, "{}", line.unwrap()).unwrap();
+                            }
+                        }
+                    }
+                    std::fs::rename(temp_file, &history_file).unwrap();
+                }
+                rl.add_history_entry(line.as_str());                      
                 rl.save_history(&history_file).unwrap();
                 
                 // Before evaluating, ensure we're in the foreground
@@ -231,6 +255,7 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
                 let mut state: ShellState = ShellState {
                     hostname: fallible::hostname().unwrap(),
                     username: fallible::username().unwrap(),
+                    history_limit: 500
                 };
                 for line in contents.lines() {
                     let result: String = eval(&mut state, conf, job_control, line.to_string(), false);

@@ -52,6 +52,7 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobCont
             "jobs" => handle_jobs(job_control),
             "pwd" => env::current_dir().unwrap().to_str().unwrap().to_string(),
             "settings" => handle_settings(conf, &expanded_cmd_parts),
+            "TEST" => test_nash(conf, state, job_control, &expanded_cmd_parts),
             _ => {
                 // If not a built-in command, execute as an external command
                 let result: String = execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts, internal, job_control);
