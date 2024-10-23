@@ -69,6 +69,7 @@ pub fn handle_settings(conf: &mut Config, cmd_parts: &[String]) -> String {
     let temp: bool = flag_args.contains_key("temp") || flag_args.contains_key("t");
     let settings: Vec<GUIEntry> = vec![
         GUIEntry::new("error", "bool", &conf.get_rule("error", false).unwrap_or("false")),
+        GUIEntry::new("hist_size", "int", &conf.get_rule("hist_size", false).unwrap_or("500")),
         GUIEntry::new("delete_on_reset", "bool", &conf.get_rule("delete_on_reset", false).unwrap_or("false")),
     ];
 

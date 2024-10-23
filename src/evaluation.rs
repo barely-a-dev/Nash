@@ -39,7 +39,6 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobCont
                 println!("Exiting...");
                 process::exit(0);
             }
-            // TODO: Allow summonning of current directory files IE summon ./pkill
             "summon" => handle_summon(&expanded_cmd_parts),
             "alias" => handle_alias(&expanded_cmd_parts),
             "rmalias" => handle_remove_alias(&expanded_cmd_parts),

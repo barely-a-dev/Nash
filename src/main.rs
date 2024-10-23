@@ -1,5 +1,4 @@
-// Important TODOs: Fix updating, which evidently never worked
-// MAJOR TODOs: export for env vars; wildcards/regex (*, ?, []), job control; prompt customization with PS1, PS2, etc.
+// MAJOR TODOs: export for env vars; wildcards/regex (*, ?, []); prompt customization with PS1, PS2, etc.
 // HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables); [[ expression ]] and (( expression ))
 // TODO: Make a history limit, that erases the oldest history entry for each command.
 pub mod editing;
@@ -252,13 +251,20 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
     if update {
         if Path::new("/usr/bin/nbm").exists()
         {
-            if force
+            if fallible::username().unwrap_or("user".to_string()) == "root"
             {
-                println!("Update command exited with status: {}", Command::new("nbm").args(["--update", "--force"]).status().unwrap_or(Default::default()).code().unwrap_or(1));
+                if force
+                {
+                    println!("Update command exited with status: {}", Command::new("nbm").args(["--update", "--force"]).status().unwrap_or(Default::default()).code().unwrap_or(1));
+                }
+                else
+                {
+                    println!("Update command exited with status: {}", Command::new("nbm").args(["--update"]).status().unwrap_or(Default::default()).code().unwrap_or(1));
+                }
             }
             else
             {
-                println!("Update command exited with status: {}", Command::new("nbm").args(["--update"]).status().unwrap_or(Default::default()).code().unwrap_or(1));
+                eprintln!("Nash must be run as root to update.");
             }
         }
         else

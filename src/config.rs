@@ -107,16 +107,11 @@ pub fn set_conf_rule(conf: &mut Config, cmd: &Vec<String>) -> String {
             set = true;
         }
         4 => {
-            // Command is in "set <option> <value>" format
+            // Command is in "set <option> <value> <temp>" format
             let option: &str = &cmd[1];
             let value: &String = &cmd[2];
             let temp: &bool = &cmd[3].parse::<bool>().unwrap_or(true);
-            match option
-            {
-                "error" => conf.set_rule("error", value, *temp),
-                "delete_on_reset" => conf.set_rule("delete_on_reset", value, *temp),
-                _ => conf.set_rule(&option, &value, *temp)
-            }
+            conf.set_rule(&option, &value, *temp);
             set = true;
         }
         _ => {
