@@ -209,7 +209,13 @@ fn download_release_files(version: &str, pb: &ProgressBar) -> Result<(), Box<dyn
         let mut buffer: [u8; 8192] = [0; 8192];
         while let Ok(n) = response.read(&mut buffer) {
             if n == 0 { break; }
-            file.write_all(&buffer[..n])?;
+            match file.write_all(&buffer[..n]) {
+                Ok(_) => {},
+                Err(e) => {
+                    eprintln!("Error writing to file: {}", e);
+                    return Err(Box::new(e));
+                }
+            }
             downloaded += n as u64;
             pb.set_position(downloaded);
         }
