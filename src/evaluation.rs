@@ -100,7 +100,7 @@ pub fn pipe_eval(_state: &mut ShellState, conf: &mut Config, job_control: &mut J
 
         let expanded_cmd_parts: Vec<String> = expand_aliases(cmd_parts);
 
-        let result = if expanded_cmd_parts[0].as_str().starts_with('.') {
+        let result: String = if expanded_cmd_parts[0].as_str().starts_with('.') {
             execute_file(&part[1..], &expanded_cmd_parts[1..])
         } else {
             match expanded_cmd_parts[0].as_str() {
@@ -145,7 +145,7 @@ pub fn pipe_eval(_state: &mut ShellState, conf: &mut Config, job_control: &mut J
                         }
                     }
 
-                    let output = child.wait_with_output().expect("Failed to read stdout");
+                    let output: process::Output = child.wait_with_output().expect("Failed to read stdout");
                     if output.status.success() {
                         String::from_utf8_lossy(&output.stdout).into_owned()
                     } else {
@@ -260,8 +260,8 @@ pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool,
 
             match command.spawn() {
                 Ok(child) => {
-                    let pid = child.id() as libc::pid_t;
-                    let cmd_string = cmd_parts.join(" ");
+                    let pid: i32 = child.id() as libc::pid_t;
+                    let cmd_string: String = cmd_parts.join(" ");
                     job_control.add_job(pid, cmd_string.clone());
 
                     if !internal {
@@ -271,7 +271,7 @@ pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool,
                         }
 
                         // Wait for the child process
-                        let result = job_control.wait_for_job(pid);
+                        let result: Result<JobStatus, Error> = job_control.wait_for_job(pid);
 
                         // Always take back terminal control
                         unsafe {
@@ -286,7 +286,7 @@ pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool,
                                         NO_RESULT.to_owned()
                                     },
                                     JobStatus::Stopped => {
-                                        let job_count = job_control.jobs.len();
+                                        let job_count: usize = job_control.jobs.len();
                                         println!("\n[{}]+  Stopped                 {}", job_count, cmd_string);
                                         NO_RESULT.to_owned()
                                     },

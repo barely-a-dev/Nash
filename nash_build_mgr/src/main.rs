@@ -26,7 +26,7 @@ fn main() {
     }
 
     // Check if Rust is installed
-    let rust_user = get_rust_user().unwrap_or_else(|| {
+    let rust_user: String = get_rust_user().unwrap_or_else(|| {
         eprintln!("Failed to determine the user with Rust installed.");
         exit(1);
     });
@@ -189,11 +189,11 @@ fn download_release_files(version: &str) -> Result<(), Box<dyn std::error::Error
         .progress_chars("##-"));
 
     for binary in &["nash", "nbm"] {
-        let url = format!("{}/{}", base_url, binary);
+        let url: String = format!("{}/{}", base_url, binary);
         pb.set_message(format!("Downloading {}", binary));
 
-        let mut response = client.get(&url).send()?;
-        let mut file = fs::File::create(binary)?;
+        let mut response: reqwest::blocking::Response = client.get(&url).send()?;
+        let mut file: fs::File = fs::File::create(binary)?;
 
         io::copy(&mut response, &mut file)?;
 
@@ -258,7 +258,7 @@ pub fn update_internal() {
 
     // Check if Rust is installed
     pb.set_message("Checking if Rust is installed");
-    let rust_user = get_rust_user().unwrap_or_else(|| {
+    let rust_user: String = get_rust_user().unwrap_or_else(|| {
         pb.finish_with_message("Failed to determine the user with Rust installed.");
         exit(1);
     });

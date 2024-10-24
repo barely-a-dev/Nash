@@ -68,7 +68,7 @@ impl JobControl {
 
     /// Add a new job to the job list
     pub fn add_job(&mut self, pid: pid_t, command: String) {
-        let job = Job {
+        let job: Job = Job {
             pid,
             command,
             status: JobStatus::Running,
@@ -119,7 +119,7 @@ impl JobControl {
     }
 
     pub fn resume_job(&mut self, pid: libc::pid_t, foreground: bool) -> Result<()> {
-        let job_count = self.jobs.len();
+        let job_count: usize = self.jobs.len();
         if let Some(job) = self.jobs.get_mut(&pid) {
             unsafe {
                 // Continue the process

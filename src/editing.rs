@@ -224,10 +224,10 @@ impl Hinter for CommandHinter {
         }
 
         // Split the line by ;, >, and | and get the last part
-        let last_part = line.split(&[';', '>', '|'][..]).last()?;
-        let trimmed_last_part = last_part.trim();
+        let last_part: &str = line.split(&[';', '>', '|'][..]).last()?;
+        let trimmed_last_part: &str = last_part.trim();
 
-        let command = trimmed_last_part.split_whitespace().next()?;
+        let command: &str = trimmed_last_part.split_whitespace().next()?;
         match command {
             "cd" => Some(" <directory>".to_string()),
             "ls" => Some(" [directory] [-l] [-a] [-d]".to_string()),

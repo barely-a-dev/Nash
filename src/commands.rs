@@ -363,13 +363,13 @@ pub fn handle_jobs(job_control: &mut JobControl) -> String {
     
     // Format job listing
     for job in jobs {
-        let current_marker = if Some(job.pid) == job_control.get_current_job().map(|j| j.pid) {
+        let current_marker: &str = if Some(job.pid) == job_control.get_current_job().map(|j| j.pid) {
             "+"
         } else {
             "-"
         };
 
-        let status_str = match job.status {
+        let status_str: &str = match job.status {
             JobStatus::Running => "Running",
             JobStatus::Stopped => "Stopped",
             JobStatus::Done => "Done",

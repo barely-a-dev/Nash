@@ -41,7 +41,7 @@ pub fn parse_job_specifier(spec: &str, job_control: &JobControl) -> Result<libc:
         // Job number specified with %
         match spec[1..].parse::<usize>() {
             Ok(job_num) => {
-                let jobs = job_control.list_jobs();
+                let jobs: Vec<&crate::jobs::Job> = job_control.list_jobs();
                 if job_num < 1
                 {
                     return std::result::Result::Err("No such job".to_owned());
