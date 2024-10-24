@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub static RECEIVED_SIGTSTP: AtomicBool = AtomicBool::new(false);
 
+// TODO: bg jobs with &
+
 pub fn setup_signal_handlers() -> std::result::Result<(), nix::Error> {
     // Setup SIGTSTP (Ctrl+Z) handler
     unsafe {

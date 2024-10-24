@@ -1,6 +1,8 @@
 // MAJOR TODOs: export for env vars; wildcards/regex (*, ?, []); prompt customization with PS1, PS2, etc.
 // HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables); [[ expression ]] and (( expression ))
-// TODO: Make a history limit, that erases the oldest history entry for each command.
+// TODO: Quotes and escaping?; $(command)/command substitution; process substitution; -c for commands; file descriptor stuff; pushd/popd/dirs
+
+// Current TODO focus: prompt customization
 pub mod editing;
 pub mod config;
 pub mod arguments;
@@ -19,7 +21,7 @@ use crate::editing::{CommandHinter, AutoCompleter, LineHighlighter};
 use crate::config::Config;
 use crate::evaluation::eval;
 use crate::globals::ShellState;
-use crate::helpers::get_history_file_path;
+use crate::helpers::{get_history_file_path, read_prompt_from_file};
 use arguments::parse_arg_vec;
 use dirs::home_dir;
 use crate::jobs::{JobControl, RECEIVED_SIGTSTP, setup_signal_handlers};
@@ -62,8 +64,10 @@ fn main() {
     let mut state: ShellState = ShellState {
         hostname: fallible::hostname().unwrap(),
         username: fallible::username().unwrap(),
-        history_limit: conf.get_rule("hist_size", false).unwrap_or("500").trim_start_matches('-').parse::<usize>().unwrap_or(500)
+        history_limit: conf.get_rule("hist_size", false).unwrap_or("500").trim_start_matches('-').parse::<usize>().unwrap_or(500),
+        ps1_prompt: "[\\u@\\h \\w]> ".to_string(),
     };
+    
     let job_control: &mut JobControl = &mut JobControl::new();
     env::set_var("IV", eval(&mut state, &mut conf, job_control, "SHELL=/usr/bin/nash".to_owned(), true));
     runtime.block_on(async {
@@ -255,10 +259,10 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
         let mut state: ShellState = ShellState {
             hostname: fallible::hostname().unwrap(),
             username: fallible::username().unwrap(),
-            history_limit: 500
+            history_limit: 500,
+            ps1_prompt: read_prompt_from_file().unwrap_or_else(|| "[\\u@\\h \\w]> ".to_string()),
         };
-        
-        let mut executor = ScriptExecutor::new(&mut state, conf, job_control);
+        let mut executor: ScriptExecutor<'_> = ScriptExecutor::new(&mut state, conf, job_control);
         if let Err(e) = executor.execute_script(script_path) {
             eprintln!("Failed to execute script: {}", e);
         }

@@ -383,3 +383,25 @@ pub fn handle_jobs(job_control: &mut JobControl) -> String {
 
     output
 }
+
+pub fn cmd_set_prompt(args: &Vec<String>, state: &mut ShellState) -> String {
+    if args.len() != 1 {
+        return "Usage: set_prompt <format>".to_string();
+    }
+
+    let prompt_format: String = args[0].clone();
+    state.ps1_prompt = prompt_format.clone();
+
+    // Get the Nash configuration directory
+    let nash_dir: PathBuf = get_nash_dir();
+    let prompt_file: PathBuf = nash_dir.join("prompt");
+
+    // Create the PS1 environment variable assignment
+    let ps1_assignment: String = format!("PS1=\"{}\"", prompt_format);
+
+    // Write the PS1 assignment to the prompt file
+    match fs::write(&prompt_file, ps1_assignment) {
+        Ok(_) => "Prompt format updated and saved".to_string(),
+        Err(e) => format!("Error saving prompt: {}", e),
+    }
+}

@@ -1,7 +1,8 @@
 
 use crate::{globals::*, jobs::JobControl};
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{collections::HashMap, fs, path::PathBuf, env};
 use libc;
+use chrono;
 
 pub fn get_history_file_path() -> PathBuf {
     let mut path: PathBuf = get_nash_dir();
@@ -36,6 +37,48 @@ pub fn save_aliases(path: &PathBuf, aliases: &HashMap<String, String>) {
         .join("\n");
     fs::write(path, content).expect("Unable to write alias file");
 }
+
+pub fn parse_prompt(format: &str, state: &ShellState) -> String {
+    let mut result: String = String::new();
+    let mut chars: std::iter::Peekable<std::str::Chars<'_>> = format.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('u') => result.push_str(&state.username),
+                Some('h') => result.push_str(&state.hostname),
+                Some('w') => result.push_str(&env::current_dir().unwrap_or(PathBuf::from("/")).display().to_string()),
+                Some('d') => result.push_str(&chrono::Local::now().format("%Y-%m-%d").to_string()),
+                Some('t') => result.push_str(&chrono::Local::now().format("%H:%M:%S").to_string()),
+                Some('\\') => result.push('\\'),
+                Some(c) => {
+                    result.push('\\');
+                    result.push(c);
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
+}
+
+pub fn read_prompt_from_file() -> Option<String> {
+    let nash_dir = get_nash_dir();
+    let prompt_file = nash_dir.join("prompt");
+
+    match fs::read_to_string(prompt_file) {
+        Ok(content) => {
+            // Extract the prompt format from the PS1 assignment
+            content.strip_prefix("PS1=\"").and_then(|s| s.strip_suffix("\""))
+                .map(|s| s.to_string())
+        },
+        Err(_) => None,
+    }
+}
+
 pub fn parse_job_specifier(spec: &str, job_control: &JobControl) -> Result<libc::pid_t, String> {
     if spec.starts_with('%') {
         // Job number specified with %

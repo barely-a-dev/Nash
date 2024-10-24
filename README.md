@@ -125,6 +125,7 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
 - rconf <option> [temp(bool)]: Read the value of a config rule (unimplemented)
 - help: Display a help menu
 - settings: Display a simple config menu
+- setprompt <prompt>: Sets the PS1 prompt format
 
 ### Special Features
 

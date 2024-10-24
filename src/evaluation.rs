@@ -53,6 +53,8 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobCont
             "pwd" => env::current_dir().unwrap().to_str().unwrap().to_string(),
             "settings" => handle_settings(conf, &expanded_cmd_parts),
             "TEST" => test_nash(conf, state, job_control, &expanded_cmd_parts),
+            "setprompt" => cmd_set_prompt(&expanded_cmd_parts, state),
+
             _ => {
                 // If not a built-in command, execute as an external command
                 let result: String = execute_external_command(&expanded_cmd_parts[0], &expanded_cmd_parts, internal, job_control);
@@ -81,7 +83,7 @@ pub fn special_eval(state: &mut ShellState, conf: &mut Config , job_control: &mu
     result
 }
 
-pub fn pipe_eval(_state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl, cmd: String) -> String {
+pub fn pipe_eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl, cmd: String) -> String {
     let parts: Vec<String> = cmd.split('|').map(|s| s.trim().to_owned()).collect();
     let mut input: String = String::new();
 
@@ -115,6 +117,7 @@ pub fn pipe_eval(_state: &mut ShellState, conf: &mut Config, job_control: &mut J
                 "jobs" => handle_jobs(job_control),
                 "pwd" => env::current_dir().unwrap().to_str().unwrap().to_string(),
                 "settings" => handle_settings(conf, &expanded_cmd_parts),
+                "setprompt" => cmd_set_prompt(&expanded_cmd_parts, state),
                 "exit" | "reset" | "fg" | "bg" | "summon" => {
                     return format!("Command '{}' is not supported in pipes", expanded_cmd_parts[0]);
                 }
@@ -160,8 +163,8 @@ pub fn pipe_eval(_state: &mut ShellState, conf: &mut Config, job_control: &mut J
 
     input
 }
-
-pub fn out_redir_eval(_state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl, cmd: String) -> String {
+// TODO: Input redirection, actual error redirection
+pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl, cmd: String) -> String {
     let parts: Vec<String> = if cmd.contains("2>>") {
         cmd.splitn(2, "2>>").map(|s| s.trim().to_owned()).collect()
     } else if cmd.contains(">>") {
@@ -209,6 +212,7 @@ pub fn out_redir_eval(_state: &mut ShellState, conf: &mut Config, job_control: &
             "jobs" => handle_jobs(job_control),
             "pwd" => env::current_dir().unwrap().to_str().unwrap().to_string(),
             "settings" => handle_settings(conf, &expanded_cmd_parts),
+            "setprompt" => cmd_set_prompt(&expanded_cmd_parts, state),
             "exit" | "reset" | "fg" | "bg" | "summon" => {
                 return format!("Command '{}' is not supported with output redirection", expanded_cmd_parts[0]);
             }

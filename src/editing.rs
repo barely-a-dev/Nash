@@ -35,7 +35,8 @@ impl AutoCompleter {
             "unset".to_string(),
             "rconf".to_string(),
             "reset".to_string(),
-            "settings".to_string()
+            "settings".to_string(),
+            "setprompt".to_string()
             // More built-in commands here
         ];
 
@@ -243,6 +244,7 @@ impl Hinter for CommandHinter {
             "set" => Some(" <<<option> <value>>/<flag>>".to_string()),
             "unset" => Some(" <option> <temp(bool)".to_string()),
             "rconf" => Some(" <option> [temp(bool)]".to_string()),
+            "setprompt" => Some(" <prompt>".to_string()),
             _ => None,
         }
     }

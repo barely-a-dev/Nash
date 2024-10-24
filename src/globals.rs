@@ -7,12 +7,13 @@ use termion::raw::IntoRawMode;
 use termion::cursor::Goto;
 use termion::clear;
 
-
 pub struct ShellState {
-    pub username: String,
     pub hostname: String,
-    pub history_limit: usize
+    pub username: String,
+    pub history_limit: usize,
+    pub ps1_prompt: String,
 }
+
 pub const NO_RESULT: &str = "";
 
 pub fn get_nash_dir() -> PathBuf {
