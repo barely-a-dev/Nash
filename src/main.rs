@@ -223,12 +223,12 @@ fn repl(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl)
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                // Need to actually handle as SIGINT
-                println!("CTRL-C");
+                // TODO: actually handle as SIGINT
+                println!("^C");
                 break;
             }
             Err(ReadlineError::Eof) => {
-                println!("CTRL-D");
+                println!("^D");
                 break;
             }
             Err(err) => {
