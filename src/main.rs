@@ -269,7 +269,7 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
 
     // Handle other command-line arguments
     if version {
-        println!("v0.0.9.7.1");
+        println!("v0.0.9.7.2");
         return;
     }
 
