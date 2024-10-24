@@ -1,6 +1,6 @@
-use std::{env, fs, io::{Write, Read}, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::{exit, Command}, time::Duration};
+use std::{env, fs, io, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::{exit, Command}, time::Duration};
 use git2::Repository;
-use reqwest::blocking::{Client, Response};
+use reqwest::blocking::Client;
 use whoami::fallible;
 use serde_json::Value;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -152,29 +152,19 @@ fn get_most_recent_version() -> Option<String> {
 fn set_version(version: &str) -> bool {
     match find_release(&version) {
         Ok(true) => {
-            let pb: ProgressBar = ProgressBar::new_spinner();
-            pb.set_style(ProgressStyle::default_spinner()
-                .template("{spinner:.green} [{elapsed_precise}] {msg}")
-                .unwrap_or_else(|_| ProgressStyle::default_spinner())
-            );
-
             // Download release's nash and nbm file
-            pb.set_message("Downloading release files");
-            if let Err(e) = download_release_files(version, &pb) {
-                pb.finish_with_message("Failed to download release files");
+            if let Err(e) = download_release_files(version) {
                 eprintln!("Failed to download release files: {}", e);
                 return false;
             }
 
             // Set permissions and move to /usr/bin/
-            pb.set_message("Installing binaries");
             if let Err(e) = install_binaries() {
-                pb.finish_with_message("Failed to install binaries");
                 eprintln!("Failed to install binaries: {}", e);
                 return false;
             }
-            pb.finish_with_message("Version set successfully");
 
+            println!("Version set successfully");
             true
         },
         Ok(false) => {
@@ -188,56 +178,30 @@ fn set_version(version: &str) -> bool {
     }
 }
 
-fn download_release_files(version: &str, pb: &ProgressBar) -> Result<(), Box<dyn std::error::Error>> {
-    let client: Client = Client::new();
-    let base_url: String = format!("https://github.com/barely-a-dev/Nash/releases/download/{}", version);
+fn download_release_files(version: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::new();
+    let base_url = format!("https://github.com/barely-a-dev/Nash/releases/download/{}", version);
 
-    let total_size: u64 = get_total_size(&client, &base_url)?;
+    let pb = ProgressBar::new(100);
     pb.set_style(ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} {msg}")
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
         .unwrap_or_else(|_| ProgressStyle::default_bar())
         .progress_chars("##-"));
-    pb.set_length(total_size);
-
-    let mut downloaded = 0;
-
-    for binary in &["nash", "nbm"] {
-        let url: String = format!("{}/{}", base_url, binary);
-        let mut response: Response = client.get(&url).send()?;
-        let mut file: fs::File = fs::File::create(binary)?;
-
-        let mut buffer: [u8; 8192] = [0; 8192];
-        while let Ok(n) = response.read(&mut buffer) {
-            if n == 0 { break; }
-            match file.write_all(&buffer[..n]) {
-                Ok(_) => {},
-                Err(e) => {
-                    eprintln!("Error writing to file: {}", e);
-                    return Err(Box::new(e));
-                }
-            }
-            downloaded += n as u64;
-            pb.set_position(downloaded);
-        }
-    }
-
-    Ok(())
-}
-
-fn get_total_size(client: &Client, base_url: &str) -> Result<u64, Box<dyn std::error::Error>> {
-    let mut total_size: u64 = 0;
 
     for binary in &["nash", "nbm"] {
         let url = format!("{}/{}", base_url, binary);
-        let response = client.head(&url).send()?;
-        total_size += response.headers()
-            .get("content-length")
-            .and_then(|cl| cl.to_str().ok())
-            .and_then(|cls| cls.parse().ok())
-            .unwrap_or(0);
+        pb.set_message(format!("Downloading {}", binary));
+
+        let mut response = client.get(&url).send()?;
+        let mut file = fs::File::create(binary)?;
+
+        io::copy(&mut response, &mut file)?;
+
+        pb.inc(50); // Increment progress bar by 50% for each file
     }
 
-    Ok(total_size)
+    pb.finish_with_message("Download completed");
+    Ok(())
 }
 
 fn install_binaries() -> Result<(), Box<dyn std::error::Error>> {
@@ -331,6 +295,18 @@ pub fn update_internal() {
 
     // Navigate to the cloned directory
     env::set_current_dir(&tmp_dir).expect("Failed to change directory");
+
+    // Set permissions
+    match Command::new("sudo")
+        .args(&["chown", &rust_user, &tmp_dir.to_str().unwrap_or("/tmp")])
+        .current_dir(&tmp_dir)
+        .status() {
+        Ok(status) if status.success() => pb.inc(30),
+        _ => {
+            pb.finish_with_message("Failed to build the project");
+            return;
+        }
+    }
 
     // Build the project
     pb.set_message("Building the project");
