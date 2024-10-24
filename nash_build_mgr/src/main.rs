@@ -26,7 +26,14 @@ fn main() {
     }
 
     // Check if Rust is installed
-    match Command::new("rustc").arg("--version").output() {
+    let rust_user = get_rust_user().unwrap_or_else(|| {
+        eprintln!("Failed to determine the user with Rust installed.");
+        exit(1);
+    });
+
+    match Command::new("sudo")
+        .args(&["-u", &rust_user, "rustc", "--version"])
+        .output() {
         Ok(_) => {},
         Err(_) => {
             eprintln!("Rust is not installed. Please install Rust.");
@@ -281,7 +288,14 @@ pub fn update_internal() {
 
     // Check if Rust is installed
     pb.set_message("Checking if Rust is installed");
-    match Command::new("rustc").arg("--version").output() {
+    let rust_user = get_rust_user().unwrap_or_else(|| {
+        pb.finish_with_message("Failed to determine the user with Rust installed.");
+        exit(1);
+    });
+
+    match Command::new("sudo")
+        .args(&["-u", &rust_user, "rustc", "--version"])
+        .output() {
         Ok(_) => pb.inc(10),
         Err(_) => {
             pb.finish_with_message("Rust is not installed. Please install Rust and try again.");
@@ -314,7 +328,10 @@ pub fn update_internal() {
 
     // Build the project
     pb.set_message("Building the project");
-    match Command::new("cargo").args(&["build", "--release"]).status() {
+    match Command::new("sudo")
+        .args(&["-u", &rust_user, "cargo", "build", "--release"])
+        .current_dir(&tmp_dir)
+        .status() {
         Ok(status) if status.success() => pb.inc(30),
         _ => {
             pb.finish_with_message("Failed to build the project");
@@ -379,5 +396,14 @@ pub fn get_remote_version() -> String {
             }
         },
         Err(_) => "FAIL".to_string(),
+    }
+}
+
+fn get_rust_user() -> Option<String> {
+    if let Ok(output) = Command::new("who").output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout.lines().next().and_then(|line| line.split_whitespace().next().map(String::from))
+    } else {
+        None
     }
 }
