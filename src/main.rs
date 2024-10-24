@@ -10,6 +10,7 @@ pub mod commands;
 pub mod helpers;
 pub mod command_parsing;
 pub mod jobs;
+pub mod script;
 
 #[cfg(feature = "use-libc")]
 extern crate libc;
@@ -22,6 +23,7 @@ use crate::helpers::get_history_file_path;
 use arguments::parse_arg_vec;
 use dirs::home_dir;
 use crate::jobs::{JobControl, RECEIVED_SIGTSTP, setup_signal_handlers};
+use crate::script::ScriptExecutor;
 use rustyline::{
     completion::{Completer, Pair},
     error::ReadlineError,
@@ -34,7 +36,7 @@ use rustyline_derive::Helper;
 use std::{
     borrow::Cow,
     env,
-    fs::{self, File},
+    fs::File,
     io::{BufReader, BufRead, Write},
     path::{Path, PathBuf},
     process::{exit, Command},
@@ -249,20 +251,16 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
     // Check if arg 1 is a path, if so, run it as a series of commands (like bash's .sh running impl) (scripting)
     // PLACEHOLDER, WILL NOT WORK LIKE INTENDED!!
     if main_args.len() > 0 && Path::new(&main_args[0]).exists() {
-        let script_path: &String = &main_args[0];
-        match fs::read_to_string(script_path) {
-            Ok(contents) => {
-                let mut state: ShellState = ShellState {
-                    hostname: fallible::hostname().unwrap(),
-                    username: fallible::username().unwrap(),
-                    history_limit: 500
-                };
-                for line in contents.lines() {
-                    let result: String = eval(&mut state, conf, job_control, line.to_string(), false);
-                    print(result);
-                }
-            }
-            Err(e) => eprintln!("Failed to read script file: {}", e),
+        let script_path: &Path = Path::new(&main_args[0]);
+        let mut state: ShellState = ShellState {
+            hostname: fallible::hostname().unwrap(),
+            username: fallible::username().unwrap(),
+            history_limit: 500
+        };
+        
+        let mut executor = ScriptExecutor::new(&mut state, conf, job_control);
+        if let Err(e) = executor.execute_script(script_path) {
+            eprintln!("Failed to execute script: {}", e);
         }
         return;
     }

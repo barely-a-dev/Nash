@@ -2,7 +2,7 @@ use crate::config::*;
 use crate::globals::*;
 use crate::commands::*;
 use crate::command_parsing::*;
-use crate::jobs::{JobControl, JobStatus};
+use crate::jobs::JobControl;
 use std::process::{self, Stdio, Command};
 use std::{fs::OpenOptions, io::{Write, Error}, env, path::PathBuf, os::unix::process::CommandExt};
 
@@ -241,7 +241,7 @@ pub fn out_redir_eval(_state: &mut ShellState, conf: &mut Config, job_control: &
 pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool, job_control: &mut JobControl) -> String {
     match find_command_in_path(cmd) {
         Some(path) => {
-            let mut command = Command::new(path);
+            let mut command: Command = Command::new(path);
             if cmd_parts.len() > 1 {
                 command.args(&cmd_parts[1..]);
             }
@@ -250,12 +250,12 @@ pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool,
 
             if internal {
                 command.stdin(Stdio::null());
-                command.stdout(Stdio::null());
-                command.stderr(Stdio::null());
+                command.stdout(Stdio::piped());
+                command.stderr(Stdio::piped());
             } else {
                 command.stdin(Stdio::inherit());
-                command.stdout(Stdio::inherit());
-                command.stderr(Stdio::inherit());
+                command.stdout(Stdio::piped());
+                command.stderr(Stdio::piped());
             }
 
             match command.spawn() {
@@ -269,34 +269,30 @@ pub fn execute_external_command(cmd: &str, cmd_parts: &[String], internal: bool,
                         unsafe {
                             libc::tcsetpgrp(libc::STDIN_FILENO, pid);
                         }
+                    }
 
-                        // Wait for the child process
-                        let result: Result<JobStatus, Error> = job_control.wait_for_job(pid);
+                    // Wait for the child process and capture its output
+                    let output: process::Output = child.wait_with_output().expect("Failed to wait on child");
 
+                    if !internal {
                         // Always take back terminal control
                         unsafe {
                             libc::tcsetpgrp(libc::STDIN_FILENO, libc::getpgrp());
                         }
+                    }
 
-                        match result {
-                            Ok(status) => {
-                                match status {
-                                    JobStatus::Done => {
-                                        job_control.remove_job(pid);
-                                        NO_RESULT.to_owned()
-                                    },
-                                    JobStatus::Stopped => {
-                                        let job_count: usize = job_control.jobs.len();
-                                        println!("\n[{}]+  Stopped                 {}", job_count, cmd_string);
-                                        NO_RESULT.to_owned()
-                                    },
-                                    _ => format!("Unexpected job status: {:?}", status),
-                                }
-                            },
-                            Err(e) => format!("Error waiting for command: {}", e),
+                    let stdout: String = String::from_utf8_lossy(&output.stdout).into_owned();
+                    let stderr: String = String::from_utf8_lossy(&output.stderr).into_owned();
+
+                    if output.status.success() {
+                        job_control.remove_job(pid);
+                        if stdout.is_empty() && stderr.is_empty() {
+                            NO_RESULT.to_owned()
+                        } else {
+                            format!("{}{}", stdout, stderr)
                         }
                     } else {
-                        NO_RESULT.to_owned()
+                        format!("Command failed: {}", stderr)
                     }
                 }
                 Err(e) => format!("Failed to execute command: {}", e),
