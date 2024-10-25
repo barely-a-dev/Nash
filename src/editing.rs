@@ -4,6 +4,7 @@ use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
 use rustyline::Context;
 use rustyline::Result;
+use rustyline::history::History;
 use std::fs::DirEntry;
 use std::io;
 use std::borrow::Cow;
@@ -208,11 +209,21 @@ impl Highlighter for LineHighlighter {
         true
     }
 }
-pub struct CommandHinter;
+
+pub struct CommandHinter {
+    history: Vec<String>,
+}
 
 impl CommandHinter {
-    pub fn new() -> Self {
-        CommandHinter
+    pub fn new(history: &History) -> Self {
+        CommandHinter { 
+            history: history.iter().map(|s| s.to_string()).collect() 
+        }
+    }
+
+    // Modified to accept Vec<String> instead of History
+    pub fn update_history(&mut self, history_entries: &Vec<String>) {
+        self.history = history_entries.clone();
     }
 }
 
@@ -224,28 +235,13 @@ impl Hinter for CommandHinter {
             return None;
         }
 
-        // Split the line by ;, >, and | and get the last part
-        let last_part: &str = line.split(&[';', '>', '|'][..]).last()?;
-        let trimmed_last_part: &str = last_part.trim();
-
-        let command: &str = trimmed_last_part.split_whitespace().next()?;
-        match command {
-            "cd" => Some(" <directory>".to_string()),
-            "ls" => Some(" [directory] [-l] [-a] [-d]".to_string()),
-            "cp" => Some(" [-r|R] [-f] <source> <destination>".to_string()),
-            "mv" => Some(" [-f] <source> <destination>".to_string()),
-            "rm" => Some(" [-f] <file>".to_string()),
-            "mkdir" => Some(" [-p] <directory>".to_string()),
-            "history" => Some("".to_string()),
-            "exit" => Some("".to_string()),
-            "summon" => Some(" [-w] <command>".to_string()),
-            "alias" => Some(" <identifier>[=<command>]".to_string()),
-            "rmalias" => Some(" <identifier>".to_string()),
-            "set" => Some(" <<<option> <value>>/<flag>>".to_string()),
-            "unset" => Some(" <option> <temp(bool)".to_string()),
-            "rconf" => Some(" <option> [temp(bool)]".to_string()),
-            "setprompt" => Some(" <prompt>".to_string()),
-            _ => None,
+        // Search for the most recent command in history that starts with the current input
+        for entry in self.history.iter().rev() {
+            if entry.starts_with(line) && entry.len() > line.len() {
+                return Some(entry[pos..].to_string());
+            }
         }
+
+        None
     }
 }

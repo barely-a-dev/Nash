@@ -65,17 +65,18 @@ pub fn parse_prompt(format: &str, state: &ShellState) -> String {
     result
 }
 
-pub fn read_prompt_from_file() -> Option<String> {
-    let nash_dir = get_nash_dir();
-    let prompt_file = nash_dir.join("prompt");
+pub fn read_prompt_from_file() -> String {
+    let nash_dir: PathBuf = get_nash_dir();
+    let prompt_file: PathBuf = nash_dir.join("prompt");
 
     match fs::read_to_string(prompt_file) {
         Ok(content) => {
             // Extract the prompt format from the PS1 assignment
-            content.strip_prefix("PS1=\"").and_then(|s| s.strip_suffix("\""))
-                .map(|s| s.to_string())
+            let ps1: String = content.strip_prefix("PS1=\"").and_then(|s| s.strip_suffix("\"")).map(|s| s.to_string()).unwrap_or_else(|| "[\\u@\\h \\w]> ".to_string());
+            env::set_var("PS1", ps1.clone());
+            return ps1;
         },
-        Err(_) => None,
+        Err(_) => "[\\u@\\h \\w]> ".to_string(),
     }
 }
 

@@ -2,7 +2,7 @@
 // HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables); [[ expression ]] and (( expression ))
 // TODO: Quotes and escaping?; $(command)/command substitution; process substitution; -c for commands; file descriptor stuff; pushd/popd/dirs
 
-// Current TODO focus: prompt customization
+// Current TODO focus: prompt customization, but as it ?requires export?, that first
 pub mod editing;
 pub mod config;
 pub mod arguments;
@@ -24,6 +24,7 @@ use crate::globals::ShellState;
 use crate::helpers::{get_history_file_path, read_prompt_from_file};
 use arguments::parse_arg_vec;
 use dirs::home_dir;
+use globals::get_nash_dir;
 use crate::jobs::{JobControl, RECEIVED_SIGTSTP, setup_signal_handlers};
 use crate::script::ScriptExecutor;
 use rustyline::{
@@ -64,12 +65,13 @@ fn main() {
     let mut state: ShellState = ShellState {
         hostname: fallible::hostname().unwrap(),
         username: fallible::username().unwrap(),
-        history_limit: conf.get_rule("hist_size", false).unwrap_or("500").trim_start_matches('-').parse::<usize>().unwrap_or(500),
-        ps1_prompt: "[\\u@\\h \\w]> ".to_string(),
+        history_limit: 500,
+        ps1_prompt: read_prompt_from_file(),
     };
     
     let job_control: &mut JobControl = &mut JobControl::new();
-    env::set_var("IV", eval(&mut state, &mut conf, job_control, "SHELL=/usr/bin/nash".to_owned(), true));
+    eval(&mut state, &mut conf, job_control, "SHELL=/usr/bin/nash".to_owned(), true);
+    eval(&mut state, &mut conf, job_control, format!("NASH={}", get_nash_dir().display()).to_owned(), true);
     runtime.block_on(async {
         let args: Vec<String> = std::env::args().collect();
         if args.len() <= 1 {
@@ -140,18 +142,19 @@ impl Highlighter for ShellHelper {
 
 fn repl(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl) {
     let history_file: PathBuf = get_history_file_path();
-    let helper: ShellHelper = ShellHelper {
-        completer: AutoCompleter::new(PathBuf::from(env::current_dir().unwrap_or(PathBuf::from("/")))),
-        highlighter: LineHighlighter::new(),
-        hinter: CommandHinter::new(),
-        validator: MatchingBracketValidator::new(),
-    };
     let mut rl: Editor<ShellHelper> = Editor::new();
-    rl.set_helper(Some(helper));
 
     if rl.load_history(&history_file).is_err() {
         println!("No previous history.");
     }
+
+    let helper: ShellHelper = ShellHelper {
+        completer: AutoCompleter::new(PathBuf::from(env::current_dir().unwrap_or(PathBuf::from("/")))),
+        highlighter: LineHighlighter::new(),
+        hinter: CommandHinter::new(rl.history()),
+        validator: MatchingBracketValidator::new(),
+    };
+    rl.set_helper(Some(helper));
 
     // Setup signal handlers
     if let Err(e) = setup_signal_handlers() {
@@ -221,12 +224,22 @@ fn repl(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl)
                 job_control.cleanup_jobs();   
                 //println!("main Made it 4 (passed cleanup)");             
                 
-                // Update the current directory in the AutoCompleter
+                // Get the history entries before getting the mutable helper
+                let history_entries: Vec<String> = rl
+                .history()
+                .iter()
+                .map(|entry| entry.to_string())
+                .collect();
+
+                // Now update the helper with the collected history
                 if let Some(helper) = rl.helper_mut() {
-                    helper
-                        .completer
-                        .update_current_dir(env::current_dir().unwrap_or(PathBuf::from("/")));
-                }
+                helper
+                    .completer
+                    .update_current_dir(env::current_dir().unwrap_or(PathBuf::from("/")));
+                    
+                // Update the hinter with our collected history
+                helper.hinter.update_history(&history_entries);
+                }                                               
             }
             Err(ReadlineError::Interrupted) => {
                 // TODO: actually handle as SIGINT
@@ -260,7 +273,7 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
             hostname: fallible::hostname().unwrap(),
             username: fallible::username().unwrap(),
             history_limit: 500,
-            ps1_prompt: read_prompt_from_file().unwrap_or_else(|| "[\\u@\\h \\w]> ".to_string()),
+            ps1_prompt: read_prompt_from_file(),
         };
         let mut executor: ScriptExecutor<'_> = ScriptExecutor::new(&mut state, conf, job_control);
         if let Err(e) = executor.execute_script(script_path) {
@@ -271,7 +284,7 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
 
     // Handle other command-line arguments
     if version {
-        println!("v0.0.9.7.3");
+        println!("v0.0.9.7.4");
         return;
     }
 
