@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   build-test-release:
-    runs-on: ArchBox
+    runs-on: [self-hosted, linux, x64]
     
     steps:
     - name: Checkout code
