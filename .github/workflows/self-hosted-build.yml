@@ -1,4 +1,4 @@
-name: Build, Test, and Release Nash
+name: SH Build, Test, and Release Nash
 
 on:
   workflow_dispatch:
