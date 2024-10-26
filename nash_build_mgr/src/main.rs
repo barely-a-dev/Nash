@@ -42,7 +42,7 @@ fn main() {
     }
 
     if args.is_empty() || (!force && !do_update && set_ver.is_none() && !list) {
-        println!("You must pass at least one valid argument.");
+        println!("Usage: nbm --setver <<version>|recent> or nbm --update");
         exit(1);
     } else if list {
         println!("{}", list_releases().unwrap_or("Failed to list releases".to_string()));
@@ -50,7 +50,7 @@ fn main() {
     } else if let Some(set_ver_index) = set_ver {
         if fallible::username().map(|u: String| u == "root").unwrap_or(false) {
             if set_ver_index >= args.len() - 1 {
-                println!("Usage: nbm --setver v<version_number> or nbm --setver recent");
+                println!("Usage: nbm --setver <<version>|recent> or nbm --update");
                 return;
             } else {
                 let version: &String = &args[set_ver_index + 1];
