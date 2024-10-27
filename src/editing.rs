@@ -37,7 +37,8 @@ impl AutoCompleter {
             "rconf".to_string(),
             "reset".to_string(),
             "settings".to_string(),
-            "setprompt".to_string()
+            "setprompt".to_string(),
+            "export".to_string()
             // More built-in commands here
         ];
 

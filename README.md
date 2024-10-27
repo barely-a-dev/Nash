@@ -115,7 +115,7 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
 - cd <directory>: Change the current directory
 - history [--size|s] [--clear|c]: Display command history
 - exit: Exit the shell
-- summon [-w] <command>: Open an *external* command in a new terminal window
+- summon [-w] <command>: Open an *external* command in a new terminal window (kind of non-functional)
   - -w: Wait for process exit before continuing
 - alias <identifier>[=original]: Create an alias for a command
 - rmalias <identifier>: Remove an alias for a command
@@ -125,7 +125,8 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
 - rconf <option> [temp(bool)]: Read the value of a config rule (unimplemented)
 - help: Display a help menu
 - settings: Display a simple config menu
-- setprompt <prompt>: Sets the PS1 prompt format
+- setprompt <format>: Sets the PS1 prompt format
+- export: Exports an environment variable to be available to child processes
 
 ### Special Features
 
@@ -136,7 +137,7 @@ After installation, you can start Nash by typing `nash` in your terminal. The mo
 
 ## Development Status
 
-Nash is currently in early development (v0.0.9.7.4). While it's functional for basic use, many features are still being implemented or improved.
+Nash is currently in early development (v0.0.9.7.5). While it's functional for basic use, many features are still being implemented or improved.
 
 ## Contributing
 

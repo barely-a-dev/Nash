@@ -6,13 +6,27 @@ use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 use termion::cursor::Goto;
 use termion::clear;
+use std::env;
+use std::collections::HashMap;
 
 pub struct ShellState {
     pub hostname: String,
     pub username: String,
     pub history_limit: usize,
     pub ps1_prompt: String,
+    pub local_vars: HashMap<String, String>,
 }
+
+impl ShellState {
+    pub fn set_local_var(&mut self, name: &str, value: &str) {
+        self.local_vars.insert(name.to_string(), value.to_string());
+    }
+
+    pub fn get_var(&self, name: &str) -> Option<String> {
+        self.local_vars.get(name).cloned().or_else(|| env::var(name).ok())
+    }
+}
+
 
 pub const NO_RESULT: &str = "";
 

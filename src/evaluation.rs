@@ -9,7 +9,7 @@ use std::{fs::OpenOptions, io::{Write, Error}, env, path::PathBuf, os::unix::pro
 pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobControl, cmd: String, internal: bool) -> String {
     let chars_to_check: [char; 3] = [';', '|', '>'];
 
-    let expanded_cmd: String = if cmd.starts_with('.') { lim_expand(&cmd) } else { expand(&cmd) };
+    let expanded_cmd: String = if cmd.starts_with('.') { lim_expand(state, &cmd) } else { expand(state, &cmd) };
     let cmd_parts: Vec<String> = split_command(&expanded_cmd);
 
     if cmd_parts.is_empty() {
@@ -18,7 +18,13 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobCont
 
     // Check if the first part is an environment variable assignment
     if cmd_parts[0].contains('=') {
-        return env_var_eval(job_control, cmd_parts[0].clone());
+        let parts: Vec<&str> = cmd_parts[0].splitn(2, '=').collect();
+        if parts.len() == 2 {
+            state.set_local_var(parts[0], parts[1]);
+            return NO_RESULT.to_owned();
+        } else {
+            return "Invalid variable assignment".to_owned();
+        }
     }
 
     let expanded_cmd_parts: Vec<String> = expand_aliases(cmd_parts);
@@ -40,7 +46,7 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobCont
                 process::exit(0);
             }
             "summon" => handle_summon(&expanded_cmd_parts),
-            "alias" => handle_alias(&expanded_cmd_parts),
+            "alias" => handle_alias(state, &expanded_cmd_parts),
             "rmalias" => handle_remove_alias(&expanded_cmd_parts),
             "help" => show_help(),
             "set" => set_conf_rule(conf, &expanded_cmd_parts),
@@ -54,6 +60,7 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobCont
             "settings" => handle_settings(conf, &expanded_cmd_parts),
             "TEST" => test_nash(conf, state, job_control, &expanded_cmd_parts),
             "setprompt" => cmd_set_prompt(&expanded_cmd_parts, state),
+            "export" => export_env_var_eval(state, &expanded_cmd_parts),
 
             _ => {
                 // If not a built-in command, execute as an external command
@@ -88,7 +95,7 @@ pub fn pipe_eval(state: &mut ShellState, conf: &mut Config, job_control: &mut Jo
     let mut input: String = String::new();
 
     for part in parts {
-        let expanded_cmd: String = if part.starts_with('.') { lim_expand(&part) } else { expand(&part) };
+        let expanded_cmd: String = if part.starts_with('.') { lim_expand(state, &part) } else { expand(state, &part) };
         let cmd_parts: Vec<String> = split_command(&expanded_cmd);
 
         if cmd_parts.is_empty() {
@@ -108,7 +115,7 @@ pub fn pipe_eval(state: &mut ShellState, conf: &mut Config, job_control: &mut Jo
             match expanded_cmd_parts[0].as_str() {
                 "cd" => handle_cd(&expanded_cmd_parts),
                 "history" => handle_history(&expanded_cmd_parts),
-                "alias" => handle_alias(&expanded_cmd_parts),
+                "alias" => handle_alias(state, &expanded_cmd_parts),
                 "rmalias" => handle_remove_alias(&expanded_cmd_parts),
                 "help" => show_help(),
                 "set" => set_conf_rule(conf, &expanded_cmd_parts),
@@ -118,7 +125,7 @@ pub fn pipe_eval(state: &mut ShellState, conf: &mut Config, job_control: &mut Jo
                 "pwd" => env::current_dir().unwrap().to_str().unwrap().to_string(),
                 "settings" => handle_settings(conf, &expanded_cmd_parts),
                 "setprompt" => cmd_set_prompt(&expanded_cmd_parts, state),
-                "exit" | "reset" | "fg" | "bg" | "summon" => {
+                "exit" | "reset" | "fg" | "bg" | "summon" | "export" => {
                     return format!("Command '{}' is not supported in pipes", expanded_cmd_parts[0]);
                 }
                 _ => {
@@ -183,7 +190,7 @@ pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, job_control: &m
     let file_path: String = parts[1].clone();
     let append_mode: bool = cmd.contains(">>");
 
-    let expanded_cmd: String = if command.starts_with('.') { lim_expand(&command) } else { expand(&command) };
+    let expanded_cmd: String = if command.starts_with('.') { lim_expand(state, &command) } else { expand(state, &command) };
     let cmd_parts: Vec<String> = split_command(&expanded_cmd);
 
     if cmd_parts.is_empty() {
@@ -203,7 +210,7 @@ pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, job_control: &m
         match expanded_cmd_parts[0].as_str() {
             "cd" => handle_cd(&expanded_cmd_parts),
             "history" => handle_history(&expanded_cmd_parts),
-            "alias" => handle_alias(&expanded_cmd_parts),
+            "alias" => handle_alias(state, &expanded_cmd_parts),
             "rmalias" => handle_remove_alias(&expanded_cmd_parts),
             "help" => show_help(),
             "set" => set_conf_rule(conf, &expanded_cmd_parts),
@@ -213,7 +220,7 @@ pub fn out_redir_eval(state: &mut ShellState, conf: &mut Config, job_control: &m
             "pwd" => env::current_dir().unwrap().to_str().unwrap().to_string(),
             "settings" => handle_settings(conf, &expanded_cmd_parts),
             "setprompt" => cmd_set_prompt(&expanded_cmd_parts, state),
-            "exit" | "reset" | "fg" | "bg" | "summon" => {
+            "exit" | "reset" | "fg" | "bg" | "summon" | "export" => {
                 return format!("Command '{}' is not supported with output redirection", expanded_cmd_parts[0]);
             }
             _ => {
@@ -318,44 +325,43 @@ fn find_command_in_path(cmd: &str) -> Option<String> {
     None
 }
 
-pub fn env_var_eval(job_control: &mut JobControl, cmd: String) -> String {
-    let count: usize = cmd.chars().filter(|c| *c == '=').count();
-    if count > 1 {
-        return "Command contains more than one environment variable assignment (parsing issue)"
-            .to_owned();
-    } else if count == 1 {
-        // Handle environment variable assignment
-        let parts: Vec<String> = cmd.split('=').map(|s| s.trim().to_owned()).collect();
-        if parts.len() == 2 {
-            env::set_var(&parts[0], &parts[1]);
-            return NO_RESULT.to_owned();
-        } else {
-            return "Invalid environment variable assignment".to_owned();
-        }
+pub fn export_env_var_eval(state: &mut ShellState, cmd_parts: &[String]) -> String {
+    if cmd_parts.len() < 2 {
+        return "Usage: export <variable>=<value>".to_owned();
     }
 
-    // Handle environment variable extraction with $
-    if cmd.starts_with('$') {
-        let var_name: &str = &cmd[1..];
-        if var_name == "0" {
-            return "nash".to_owned(); // Special case for $0
-        }
-        if let Ok(value) = env::var(var_name) {
-            if cmd.trim() == format!("${}", var_name) {
-                // If the command is just the variable, attempt to execute it
-                return execute_external_command(&value, &[value.clone()], false, job_control);
+    for part in &cmd_parts[1..] {
+        if let Some(pos) = part.find('=') {
+            let (name, value) = part.split_at(pos);
+            let name: &str = name.trim();
+            let value: &str = &value[1..].trim(); // Skip the '=' character
+
+            if name.is_empty() || value.is_empty() {
+                return "Invalid export syntax. Usage: export <variable>=<value>".to_owned();
+            }
+
+            // Move from local vars to environment
+            if let Some(local_value) = state.local_vars.remove(name) {
+                env::set_var(name, local_value);
             } else {
-                // Otherwise, return the value
-                return value;
+                env::set_var(name, value);
             }
         } else {
-            return format!("Environment variable not found: {}", var_name);
+            // Handle exporting a variable without assignment
+            let name = part.trim();
+            if let Some(local_value) = state.local_vars.get(name) {
+                env::set_var(name, local_value);
+            } else if let Ok(env_value) = env::var(name) {
+                env::set_var(name, env_value);
+            } else {
+                return format!("Variable '{}' not found", name);
+            }
         }
     }
 
-    // If we reach here, it means there was no assignment or extraction
-    "Invalid environment variable operation".to_owned()
+    NO_RESULT.to_owned()
 }
+
 pub fn execute_file(path: &str, args: &[String]) -> String {
     let full_path: PathBuf = if path.starts_with('/') {
         PathBuf::from(path)

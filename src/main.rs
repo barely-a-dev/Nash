@@ -2,7 +2,8 @@
 // HUGE TODOs: Scripting (if, elif, else, fi, for, while, funcs, variables); [[ expression ]] and (( expression ))
 // TODO: Quotes and escaping?; $(command)/command substitution; process substitution; -c for commands; file descriptor stuff; pushd/popd/dirs
 
-// Current TODO focus: prompt customization, but as it ?requires export?, that first
+// Current TODO focus: prompt customization
+// Most recent update: export/ normal environment variable assignment differentiation
 pub mod editing;
 pub mod config;
 pub mod arguments;
@@ -36,6 +37,7 @@ use rustyline::{
     Context, Editor,
 };
 use rustyline_derive::Helper;
+use std::collections::HashMap;
 use std::{
     borrow::Cow,
     env,
@@ -67,6 +69,7 @@ fn main() {
         username: fallible::username().unwrap(),
         history_limit: 500,
         ps1_prompt: read_prompt_from_file(),
+        local_vars: HashMap::new()
     };
     
     let job_control: &mut JobControl = &mut JobControl::new();
@@ -274,6 +277,7 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
             username: fallible::username().unwrap(),
             history_limit: 500,
             ps1_prompt: read_prompt_from_file(),
+            local_vars: HashMap::new()
         };
         let mut executor: ScriptExecutor<'_> = ScriptExecutor::new(&mut state, conf, job_control);
         if let Err(e) = executor.execute_script(script_path) {
@@ -284,7 +288,7 @@ async fn handle_nash_args(conf: &mut Config, job_control: &mut JobControl, args:
 
     // Handle other command-line arguments
     if version {
-        println!("v0.0.9.7.4");
+        println!("v0.0.9.7.5");
         return;
     }
 

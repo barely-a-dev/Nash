@@ -1,5 +1,6 @@
 use std::{env, borrow::Cow, path::{Path, PathBuf}, collections::HashMap};
 use crate::helpers::{load_aliases, get_alias_file_path};
+use crate::globals::ShellState;
 
 pub fn split_command(cmd: &str) -> Vec<String> {
     let mut result: Vec<String> = Vec::new();
@@ -39,12 +40,12 @@ pub fn split_command(cmd: &str) -> Vec<String> {
     result
 }
 
-pub fn expand(cmd: &str) -> String {
-    expand_dots(&expand_env_vars(&expand_home(cmd).to_string()))
+pub fn expand(state: &mut ShellState, cmd: &str) -> String {
+    expand_dots(&expand_env_vars(state, &expand_home(cmd).to_string()))
 }
 
-pub fn lim_expand(cmd: &str) -> String {
-    expand_env_vars(&expand_home(cmd).to_string())
+pub fn lim_expand(state: &mut ShellState, cmd: &str) -> String {
+    expand_env_vars(state, &expand_home(cmd).to_string())
 }
 
 pub fn expand_aliases(cmd_parts: Vec<String>) -> Vec<String>
@@ -115,7 +116,7 @@ pub fn expand_home(cmd: &str) -> Cow<str> {
     }
 }
 
-pub fn expand_env_vars(cmd: &str) -> String {
+pub fn expand_env_vars(state: &mut ShellState, cmd: &str) -> String {
     let mut result: String = String::new();
     let mut in_var: bool = false;
     let mut var_name: String = String::new();
@@ -129,7 +130,7 @@ pub fn expand_env_vars(cmd: &str) -> String {
                 var_name.push(c);
             } else {
                 in_var = false;
-                if let Ok(value) = env::var(&var_name) {
+                if let Some(value) = state.get_var(&var_name) {
                     result.push_str(&value);
                 } else {
                     result.push('$');
@@ -143,7 +144,7 @@ pub fn expand_env_vars(cmd: &str) -> String {
     }
 
     if in_var {
-        if let Ok(value) = env::var(&var_name) {
+        if let Some(value) = state.get_var(&var_name) {
             result.push_str(&value);
         } else {
             result.push('$');

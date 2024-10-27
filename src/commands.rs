@@ -8,6 +8,7 @@ use crate::config::*;
 use crate::jobs::JobStatus;
 use crate::command_parsing::expand;
 
+
 pub fn reset(conf: &mut Config, nash_dir: PathBuf) -> String
 {
     conf.rules = HashMap::new();
@@ -53,7 +54,7 @@ pub fn show_help() -> String {
     "cd <directory>: Change the current directory\n\
      history [--size|s] [--clear|c]: Display command history\n\
      exit: Exit the shell\n\
-     summon [-w] <command>: Open an *external* command in a new terminal window\n\
+     summon [-w] <command>: Open an *external* command in a new terminal window (kind of non-functional)\n\
      alias <identifier>[=original]: Create an alias for a command\n\
      rmalias <identifier>: Remove an alias for a command\n\
      help: Display this help menu\n\
@@ -61,8 +62,11 @@ pub fn show_help() -> String {
      unset <option> <temp(bool)>: Unset a config rule (unimplemented)\n\
      reset: Reset the application, erase if delete_on_reset rule is true\n\
      rconf <option> [temp(bool)]: Read the value of a config rule (unimplemented)\n\
-     settings: Display a simple config menu".to_owned()
+     settings: Display a simple config menu\n\
+     export <variable>=<value>: Export a variable to the environment\n\
+     setprompt <format>: Set the PS1 prompt format".to_owned()
 }
+
 #[allow(unused_variables)]
 pub fn test_nash(conf: &mut Config, state: &mut ShellState, job_control: &mut JobControl, cmd: &[String]) -> String
 {
@@ -225,7 +229,7 @@ pub fn handle_history(cmd: &[String]) -> String {
     output
 }
 
-pub fn handle_alias(cmd_parts: &[String]) -> String {
+pub fn handle_alias(state: &mut ShellState, cmd_parts: &[String]) -> String {
     let alias_file_path: PathBuf = get_alias_file_path();
     let mut aliases: HashMap<String, String> = load_aliases(&alias_file_path);
 
@@ -243,7 +247,7 @@ pub fn handle_alias(cmd_parts: &[String]) -> String {
         if let Some(pos) = alias_str.find('=') {
             let (name, command) = alias_str.split_at(pos);
             let name: &str = name.trim();
-            let command: &str = &expand(command[1..].trim().trim_matches('\'').trim_matches('"'));
+            let command: &str = &expand(state, command[1..].trim().trim_matches('\'').trim_matches('"'));
             aliases.insert(name.to_string(), command.to_string());
             save_aliases(&alias_file_path, &aliases);
             return format!("Alias '{}' created.", name);
