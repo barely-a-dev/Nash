@@ -1,0 +1,21 @@
+[package]
+name = "nash_installer"
+version = "1.0.0"
+edition = "2021"
+description = "Nash Installer"
+authors = ["barely-a-dev <nahman1234lol12@gmail.com>"]
+license = "GPL-3.0"
+readme = "README.md"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = 3
+
+[dependencies]
+reqwest = { version = "0.12.8", features = ["blocking", "json"] }
+serde_json = "1.0"
+indicatif = "0.17.8"
+whoami = "1.5.2"
+

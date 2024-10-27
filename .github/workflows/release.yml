@@ -39,11 +39,18 @@ jobs:
         cargo build --release
         cd ..
 
+    - name: Build init_installer project
+      run: |
+        cd ./init_installer
+        cargo build --release
+        cd ..
+
     - name: Create Debian package
       run: |
         mkdir -p debian/usr/bin
         cp target/release/nash debian/usr/bin/nash
         cp nash_build_mgr/target/release/nash_build_mgr debian/usr/bin/nbm
+        cp init_installer/target/release/init_installer debian/usr/bin/init_installer
         cargo deb -p nash -o ./nash.deb
 
     - name: Run install script
@@ -97,6 +104,17 @@ jobs:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
         asset_path: ./debian/usr/bin/nbm
         asset_name: nbm
+        asset_content_type: application/octet-stream
+
+    - name: Upload init_installer Release Asset
+      if: steps.check_release.outputs.exists == 'false'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./debian/usr/bin/init_installer
+        asset_name: installer
         asset_content_type: application/octet-stream
 
     - name: Upload Debian Package

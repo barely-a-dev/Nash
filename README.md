@@ -53,20 +53,20 @@ Nash is a simple shell written in Rust, attempting to provide a modern command-l
 
 ### Automated Installation
 
-1. Download the build manager from GH:
+1. Download the installer: https://github.com/barely-a-dev/Nash/releases/tag/v0.0.9.7.5/installer
+2. Navigate to the directory containing it:
    ```
-   curl -L https://github.com/barely-a-dev/Nash/releases/download/<VERSION>/nbm -o nbm
+   cd ~/Downloads
    ```
-2. Make it executable:
+3. Make it executable:
    ```
-   chmod +x nbm
+   chmod +x installer
    ```
-3. Install nash:
+4. Install nash:
    ```
-   sudo ./nbm --setver recent
+   ./installer
    ```
-   (or any version instead of recent, IE v0.0.9, or --update)
-4. Remove the initial installer:
+5. (optional) Remove the initial installer:
    ```
    rm nbm
    ```
