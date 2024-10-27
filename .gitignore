@@ -7,3 +7,4 @@ file.txt
 src/before.rs
 nash_build_mgr/nash
 /.vscode
+/.winget
