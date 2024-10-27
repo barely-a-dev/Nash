@@ -53,7 +53,7 @@ Nash is a simple shell written in Rust, attempting to provide a modern command-l
 
 ### Automated Installation
 
-1. Download the installer: https://github.com/barely-a-dev/Nash/releases/tag/v0.0.9.7.5/installer
+1. Download the installer: https://github.com/barely-a-dev/Nash/releases/download/v0.0.9.7.5/installer
 2. Navigate to the directory containing it:
    ```
    cd ~/Downloads
