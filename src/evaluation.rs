@@ -70,7 +70,7 @@ pub fn eval(state: &mut ShellState, conf: &mut Config, job_control: &mut JobCont
                 }
                 NO_RESULT.to_owned()
             }
-        }
+        }.trim().to_owned()
     }
 }
 

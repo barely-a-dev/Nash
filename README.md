@@ -159,13 +159,13 @@ The following features and improvements are planned for future releases:
 (Note: "-" means WIP and but possibly partially implemented/unstable, while "/" means WIP but not public. ✔ of course means implemented.)
 - [-] Environment variables management system
 - [-] Enhanced command auto-completion
-- [ ] Robust configuration system
+- [-] Robust configuration system
 - [ ] Quoting and escaping mechanisms
 - [✔] Alias command support
 - [ ] Scripting capabilities (if, elif, else, for, while, functions, variables)
 - [ ] Wildcards and regex support
 - [-] Enhanced command-line options
-- [-] Improved argument handling for built-in commands
+- [✔] Improved argument handling for built-in commands
 - [✔] Support for popular, complex commands and text editors (e.g., Nano, Vim)
 - [\\] Self-updating capability (instead in NBM, below)
 - [✔] Build management system (accessible via nbm command)
